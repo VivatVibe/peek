@@ -63,9 +63,21 @@ peek print photo.png --preset "Photo 4×6 Borderless" --copies 2 --json
 peek skill install
 ```
 
-## Build, Test, and Install
+## Install
+
+### Download Prebuilt Package (Omarchy / Arch Linux `x86_64`)
+
+Download the latest `.pkg.tar.zst` from [GitHub Releases](https://github.com/VivatVibe/peek/releases/latest) and install it with `pacman`:
 
 ```sh
+sudo pacman -U peek-0.5.1-1-x86_64.pkg.tar.zst
+```
+
+### Build from Source
+
+```sh
+git clone https://github.com/VivatVibe/peek.git
+cd peek
 ./bin/build
 ./bin/test
 ./bin/install
