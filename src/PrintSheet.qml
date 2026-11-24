@@ -4,14 +4,16 @@ import QtQuick.Controls.Material
 import QtQuick.Layouts
 import Peek 1.0
 
-// macOS Preview-style print sheet: live page proof on the left, clean print
-// controls on the right.
+// macOS Preview-style print sheet: live N-up/multi-page proof on the left,
+// clean print and CUPS printer controls on the right.
 Item {
     id: sheet
 
     signal closeRequested()
 
     anchors.fill: parent
+
+    property bool moreOptionsExpanded: false
 
     function paperLabel(id) {
         switch (id) {
@@ -29,10 +31,17 @@ Item {
     readonly property var paperIds: ["a4", "letter", "4x6", "5x7", "a5", "a3", "legal"]
 
     function formatMm(value) {
-        // Read translator.language so the binding updates live on language switch.
         void translator.language
         const decimals = Math.abs(value - Math.round(value)) < 0.05 ? 0 : 1
         return Number(value).toLocaleString(Qt.locale(), 'f', decimals)
+    }
+
+    function optionIndex(list, currentVal) {
+        for (let i = 0; i < list.length; ++i) {
+            if (list[i].value === currentVal)
+                return i
+        }
+        return 0
     }
 
     // Dimmed backdrop; clicking outside closes the sheet.
@@ -50,8 +59,8 @@ Item {
     Rectangle {
         id: card
         anchors.centerIn: parent
-        width: Math.min(parent.width - 40, 900)
-        height: Math.min(parent.height - 36, 636)
+        width: Math.min(parent.width - 36, 940)
+        height: Math.min(parent.height - 28, 650)
         radius: theme.radius
         color: "#18181d"
         border.color: "#2e2e36"
@@ -67,11 +76,10 @@ Item {
             // Header bar.
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 50
+                Layout.preferredHeight: 48
                 color: "#1e1e24"
                 radius: theme.radius
 
-                // Square off bottom corners of header.
                 Rectangle {
                     anchors.left: parent.left
                     anchors.right: parent.right
@@ -83,7 +91,7 @@ Item {
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 20
-                    anchors.rightMargin: 16
+                    anchors.rightMargin: 14
                     spacing: 12
 
                     Text {
@@ -95,7 +103,14 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        text: backend.fileName
+                        text: {
+                            void translator.language
+                            if (backend.multiMode === "selected" && backend.imageCount > 1) {
+                                const count = backend.selectedCount > 0 ? backend.selectedCount : backend.imageCount
+                                return qsTr("%n images", "", count)
+                            }
+                            return backend.fileName
+                        }
                         color: "#9a9aa4"
                         font.pixelSize: 13
                         elide: Text.ElideMiddle
@@ -103,6 +118,8 @@ Item {
 
                     ToolButton {
                         Material.roundedScale: Math.min(4, theme.radius)
+                        implicitWidth: 32
+                        implicitHeight: 32
                         text: "✕"
                         font.pixelSize: 14
                         onClicked: sheet.closeRequested()
@@ -145,7 +162,7 @@ Item {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            spacing: 12
+                            spacing: 10
 
                             Text {
                                 Layout.fillWidth: true
@@ -156,6 +173,71 @@ Item {
                                 color: "#9a9aa4"
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
+                            }
+
+                            // Multi-page preview stepper.
+                            RowLayout {
+                                visible: backend.previewPageCount > 1
+                                spacing: 4
+
+                                Rectangle {
+                                    width: 24
+                                    height: 24
+                                    radius: Math.min(4, theme.radius)
+                                    color: prevPageMa.containsMouse && backend.previewPageIndex > 0 ? "#24242d" : "#18181f"
+                                    border.color: "#2e2e38"
+                                    border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "‹"
+                                        color: backend.previewPageIndex > 0 ? "#f4f4f6" : "#55555f"
+                                        font.pixelSize: 14
+                                    }
+                                    MouseArea {
+                                        id: prevPageMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        enabled: backend.previewPageIndex > 0
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.previousPreviewPage()
+                                    }
+                                }
+
+                                Text {
+                                    text: {
+                                        void translator.language
+                                        const cur = Number(backend.previewPageIndex + 1).toLocaleString(Qt.locale(), 'f', 0)
+                                        const tot = Number(backend.previewPageCount).toLocaleString(Qt.locale(), 'f', 0)
+                                        return qsTr("Page %1 / %2").arg(cur).arg(tot)
+                                    }
+                                    color: "#d4d4de"
+                                    font.pixelSize: 12
+                                }
+
+                                Rectangle {
+                                    width: 24
+                                    height: 24
+                                    radius: Math.min(4, theme.radius)
+                                    color: nextPageMa.containsMouse && backend.previewPageIndex + 1 < backend.previewPageCount ? "#24242d" : "#18181f"
+                                    border.color: "#2e2e38"
+                                    border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "›"
+                                        color: backend.previewPageIndex + 1 < backend.previewPageCount ? "#f4f4f6" : "#55555f"
+                                        font.pixelSize: 14
+                                    }
+                                    MouseArea {
+                                        id: nextPageMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        enabled: backend.previewPageIndex + 1 < backend.previewPageCount
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.nextPreviewPage()
+                                    }
+                                }
                             }
 
                             Text {
@@ -181,8 +263,8 @@ Item {
                 // Print settings pane.
                 Flickable {
                     Layout.fillHeight: true
-                    Layout.preferredWidth: 380
-                    Layout.maximumWidth: 410
+                    Layout.preferredWidth: 392
+                    Layout.maximumWidth: 420
                     contentWidth: width
                     contentHeight: controlsColumn.implicitHeight + 28
                     clip: true
@@ -192,14 +274,14 @@ Item {
                     ColumnLayout {
                         id: controlsColumn
                         x: 20
-                        y: 14
+                        y: 12
                         width: parent.width - 40
-                        spacing: 10
+                        spacing: 8
 
                         // Printer selection.
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 6
+                            spacing: 5
 
                             RowLayout {
                                 Layout.fillWidth: true
@@ -226,7 +308,7 @@ Item {
                             ComboBox {
                                 id: printerCombo
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 38
+                                Layout.preferredHeight: 36
                                 Material.roundedScale: Math.min(4, theme.radius)
                                 model: backend.printers
                                 enabled: backend.printers.length > 0
@@ -273,7 +355,7 @@ Item {
 
                             Rectangle {
                                 width: 112
-                                height: 34
+                                height: 32
                                 radius: Math.min(4, theme.radius)
                                 color: "#111115"
                                 border.color: "#2c2c34"
@@ -342,10 +424,126 @@ Item {
                             }
                         }
 
+                        // Print Selection toggle (only shown when a region is selected).
+                        Rectangle {
+                            visible: backend.hasSelection
+                            Layout.fillWidth: true
+                            implicitHeight: 36
+                            radius: Math.min(4, theme.radius)
+                            color: "#15151c"
+                            border.color: backend.printSelectionOnly ? theme.accent : "#2c2c34"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                spacing: 8
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: {
+                                        void translator.language
+                                        const w = Number(backend.selectionPixelWidth).toLocaleString(Qt.locale(), 'f', 0)
+                                        const h = Number(backend.selectionPixelHeight).toLocaleString(Qt.locale(), 'f', 0)
+                                        return qsTr("Print Selection (%1 × %2)").arg(w).arg(h)
+                                    }
+                                    color: "#f0f0f6"
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                }
+
+                                Rectangle {
+                                    width: 36
+                                    height: 20
+                                    radius: Math.min(10, Math.max(theme.radius, 2))
+                                    color: backend.printSelectionOnly ? theme.accent : "#2d2d36"
+
+                                    Rectangle {
+                                        width: 14
+                                        height: 14
+                                        radius: Math.min(7, Math.max(theme.radius, 1))
+                                        y: 3
+                                        x: backend.printSelectionOnly ? parent.width - width - 3 : 3
+                                        color: backend.printSelectionOnly ? theme.accentForeground : "#a0a0ac"
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: backend.printSelectionOnly = !backend.printSelectionOnly
+                            }
+                        }
+
+                        // Images per sheet (N-up).
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 5
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Images per Sheet")
+                                    color: "#b4b4c0"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                }
+
+                                // Optional dashed cut guides toggle when printing multi-up.
+                                Text {
+                                    visible: backend.perPage > 1
+                                    text: backend.cutGuides ? qsTr("Cut Guides: On") : qsTr("Cut Guides: Off")
+                                    color: backend.cutGuides ? theme.accent : "#8e8e9a"
+                                    font.pixelSize: 11
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.cutGuides = !backend.cutGuides
+                                    }
+                                }
+                            }
+
+                            SegmentBar {
+                                Layout.fillWidth: true
+                                currentValue: String(backend.perPage)
+                                options: [
+                                    { value: "1", label: "1" },
+                                    { value: "2", label: "2" },
+                                    { value: "4", label: "4" },
+                                    { value: "6", label: "6" },
+                                    { value: "9", label: "9" }
+                                ]
+                                onSelected: function(val) { backend.perPage = parseInt(val, 10) }
+                            }
+
+                            // Choose between repeating the current image or packing selected/folder images.
+                            SegmentBar {
+                                visible: backend.imageCount > 1 && (backend.perPage > 1 || backend.selectedCount > 1 || backend.multiMode === "selected")
+                                Layout.fillWidth: true
+                                currentValue: backend.multiMode
+                                options: {
+                                    void translator.language
+                                    const batchCount = backend.selectedCount > 0 ? backend.selectedCount : backend.imageCount
+                                    const countText = Number(batchCount).toLocaleString(Qt.locale(), 'f', 0)
+                                    const batchLabel = backend.selectedCount > 0
+                                                       ? qsTr("Selected (%1)").arg(countText)
+                                                       : qsTr("All Images (%1)").arg(countText)
+                                    return [
+                                        { value: "repeat", label: qsTr("Repeat Current") },
+                                        { value: "selected", label: batchLabel }
+                                    ]
+                                }
+                                onSelected: function(val) { backend.multiMode = val }
+                            }
+                        }
+
                         // Paper size.
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 6
+                            spacing: 5
 
                             Text {
                                 text: qsTr("Paper Size")
@@ -357,7 +555,7 @@ Item {
                             ComboBox {
                                 id: paperCombo
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 38
+                                Layout.preferredHeight: 36
                                 Material.roundedScale: Math.min(4, theme.radius)
                                 model: {
                                     void translator.language
@@ -374,7 +572,7 @@ Item {
                         // Orientation.
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 6
+                            spacing: 5
 
                             Text {
                                 text: qsTr("Orientation")
@@ -398,7 +596,7 @@ Item {
                         // Scale mode.
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 6
+                            spacing: 5
 
                             Text {
                                 text: qsTr("Scale")
@@ -450,7 +648,7 @@ Item {
                         // Margins.
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 6
+                            spacing: 5
 
                             Text {
                                 text: qsTr("Margins")
@@ -474,7 +672,7 @@ Item {
                         // Color mode.
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 6
+                            spacing: 5
 
                             Text {
                                 text: qsTr("Color")
@@ -493,6 +691,128 @@ Item {
                                 onSelected: function(val) { backend.grayscale = (val === "gray") }
                             }
                         }
+
+                        // Collapsible CUPS printer-specific options (Media Type, Quality, Duplex).
+                        ColumnLayout {
+                            visible: backend.hasPrinterOptions
+                            Layout.fillWidth: true
+                            Layout.topMargin: 2
+                            spacing: 8
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 1
+                                color: "#282830"
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                                implicitHeight: 24
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    spacing: 6
+
+                                    Text {
+                                        text: sheet.moreOptionsExpanded ? "▾" : "▸"
+                                        color: theme.accent
+                                        font.pixelSize: 12
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: qsTr("Printer Options")
+                                        color: "#d4d4de"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Medium
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: sheet.moreOptionsExpanded = !sheet.moreOptionsExpanded
+                                }
+                            }
+
+                            ColumnLayout {
+                                visible: sheet.moreOptionsExpanded
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                ColumnLayout {
+                                    visible: backend.mediaTypeOptions.length > 0
+                                    Layout.fillWidth: true
+                                    spacing: 4
+
+                                    Text {
+                                        text: qsTr("Media Type")
+                                        color: "#9a9aa4"
+                                        font.pixelSize: 11
+                                    }
+
+                                    ComboBox {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 34
+                                        Material.roundedScale: Math.min(4, theme.radius)
+                                        model: backend.mediaTypeOptions.map(function(o) { return o.label })
+                                        currentIndex: sheet.optionIndex(backend.mediaTypeOptions, backend.mediaType)
+                                        onActivated: function(idx) {
+                                            if (idx >= 0 && idx < backend.mediaTypeOptions.length)
+                                                backend.mediaType = backend.mediaTypeOptions[idx].value
+                                        }
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    visible: backend.qualityOptions.length > 0
+                                    Layout.fillWidth: true
+                                    spacing: 4
+
+                                    Text {
+                                        text: qsTr("Print Quality")
+                                        color: "#9a9aa4"
+                                        font.pixelSize: 11
+                                    }
+
+                                    ComboBox {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 34
+                                        Material.roundedScale: Math.min(4, theme.radius)
+                                        model: backend.qualityOptions.map(function(o) { return o.label })
+                                        currentIndex: sheet.optionIndex(backend.qualityOptions, backend.printQuality)
+                                        onActivated: function(idx) {
+                                            if (idx >= 0 && idx < backend.qualityOptions.length)
+                                                backend.printQuality = backend.qualityOptions[idx].value
+                                        }
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    visible: backend.duplexOptions.length > 0
+                                    Layout.fillWidth: true
+                                    spacing: 4
+
+                                    Text {
+                                        text: qsTr("Two-Sided")
+                                        color: "#9a9aa4"
+                                        font.pixelSize: 11
+                                    }
+
+                                    ComboBox {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 34
+                                        Material.roundedScale: Math.min(4, theme.radius)
+                                        model: backend.duplexOptions.map(function(o) { return o.label })
+                                        currentIndex: sheet.optionIndex(backend.duplexOptions, backend.duplex)
+                                        onActivated: function(idx) {
+                                            if (idx >= 0 && idx < backend.duplexOptions.length)
+                                                backend.duplex = backend.duplexOptions[idx].value
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -500,7 +820,7 @@ Item {
             // Footer actions.
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 60
+                Layout.preferredHeight: 58
                 color: "#1e1e24"
                 radius: theme.radius
 

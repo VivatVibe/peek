@@ -48,7 +48,7 @@ private slots:
         QVERIFY(!p1.isEmpty() && !p2.isEmpty());
 
         FakeFilePicker picker;
-        Backend backend(&picker, "/nonexistent-lpstat", "/nonexistent-lp");
+        Backend backend(&picker, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions");
         QVERIFY(backend.openFiles({p1}));
         QVERIFY(backend.hasImage());
         QCOMPARE(backend.fileName(), QString("01.png"));
@@ -72,7 +72,7 @@ private slots:
         const QString path = makeImage(dir.path(), "sample.png", 300, 150, Qt::green);
         const QByteArray originalBytes = readFile(path);
 
-        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp");
+        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions");
         QVERIFY(backend.openFiles({path}));
         QCOMPARE(backend.imageWidth(), 300);
         QCOMPARE(backend.imageHeight(), 150);
@@ -126,26 +126,80 @@ private slots:
         QCOMPARE(customRect.height(), 50.0);
     }
 
-    void exportsValidPdfAtomically() {
-        QTemporaryDir dir;
-        const QString imgPath = makeImage(dir.path(), "photo.png", 600, 400, Qt::cyan);
-        const QString pdfPath = dir.filePath("output.pdf");
+    void printRendererComputesNUpGridsAndPagination() {
+        QCOMPARE(PrintRenderer::gridForPerPage(1, false), qMakePair(1, 1));
+        QCOMPARE(PrintRenderer::gridForPerPage(2, true), qMakePair(2, 1));
+        QCOMPARE(PrintRenderer::gridForPerPage(2, false), qMakePair(1, 2));
+        QCOMPARE(PrintRenderer::gridForPerPage(4, true), qMakePair(2, 2));
+        QCOMPARE(PrintRenderer::gridForPerPage(6, true), qMakePair(3, 2));
+        QCOMPARE(PrintRenderer::gridForPerPage(6, false), qMakePair(2, 3));
+        QCOMPARE(PrintRenderer::gridForPerPage(9, false), qMakePair(3, 3));
 
-        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp");
-        QVERIFY(backend.openFiles({imgPath}));
-        backend.setPaperSize("a4");
-        backend.setGrayscale(true);
-        QVERIFY(backend.savePdfTo(pdfPath));
+        const QVector<QRectF> cells = PrintRenderer::computeGridCellRects(QRectF(10, 10, 210, 210), 2, 2, 10, 10);
+        QCOMPARE(cells.size(), 4);
+        QCOMPARE(cells.at(0), QRectF(10, 10, 100, 100));
+        QCOMPARE(cells.at(3), QRectF(120, 120, 100, 100));
 
-        const QByteArray bytes = readFile(pdfPath);
-        QVERIFY(bytes.startsWith("%PDF-"));
-        QVERIFY(bytes.size() > 500);
+        QImage a(100, 100, QImage::Format_ARGB32);
+        a.fill(Qt::red);
+        const auto repeated = PrintRenderer::paginateImages({a}, 4, true);
+        QCOMPARE(repeated.size(), 1);
+        QCOMPARE(repeated.first().size(), 4);
+
+        QVector<QImage> five(5, a);
+        const auto batched = PrintRenderer::paginateImages(five, 4, false);
+        QCOMPARE(batched.size(), 2);
+        QCOMPARE(batched.at(0).size(), 4);
+        QCOMPARE(batched.at(1).size(), 1);
     }
 
-    void discoversPrintersAndSubmitsLpJob() {
+    void multiSelectAndSelectionCropWorkForPrinting() {
+        QTemporaryDir dir;
+        QStringList paths;
+        for (int i = 1; i <= 5; ++i)
+            paths.append(makeImage(dir.path(), QString("0%1.png").arg(i), 400, 200, Qt::blue));
+
+        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions");
+        QVERIFY(backend.openFiles({paths.first()}));
+        QCOMPARE(backend.imageCount(), 5);
+
+        // Select region (half width, half height) and verify printableImage crops it.
+        backend.setSelectionRect(0.25, 0.25, 0.5, 0.5);
+        QVERIFY(backend.hasSelection());
+        QVERIFY(backend.printSelectionOnly());
+        QCOMPARE(backend.selectionPixelWidth(), 200);
+        QCOMPARE(backend.selectionPixelHeight(), 100);
+        QCOMPARE(backend.printableImage().size(), QSize(200, 100));
+
+        backend.setPrintSelectionOnly(false);
+        QCOMPARE(backend.printableImage().size(), QSize(400, 200));
+
+        // Multi-select all 5 images and pack 4-up -> 2 pages.
+        backend.selectAllFiles();
+        QCOMPARE(backend.selectedCount(), 5);
+        backend.preparePrintSheet();
+        QCOMPARE(backend.multiMode(), QString("selected"));
+        backend.setPerPage(4);
+        QCOMPARE(backend.previewPageCount(), 2);
+        QCOMPARE(backend.previewPageImages().size(), 4);
+        backend.nextPreviewPage();
+        QCOMPARE(backend.previewPageIndex(), 1);
+        QCOMPARE(backend.previewPageImages().size(), 1);
+
+        // Export multi-page PDF.
+        const QString pdfPath = dir.filePath("batch.pdf");
+        backend.setCutGuides(true);
+        QVERIFY(backend.savePdfTo(pdfPath));
+        const QByteArray bytes = readFile(pdfPath);
+        QVERIFY(bytes.startsWith("%PDF-"));
+        QVERIFY(bytes.contains("/Count 2"));
+    }
+
+    void discoversPrintersCupsOptionsAndSubmitsLpJob() {
         QTemporaryDir dir;
         const QString imgPath = makeImage(dir.path(), "doc.png", 400, 600, Qt::yellow);
         const QString fakeLpstat = dir.filePath("lpstat");
+        const QString fakeLpoptions = dir.filePath("lpoptions");
         const QString fakeLp = dir.filePath("lp");
         const QString argsLog = dir.filePath("lp_args.txt");
 
@@ -155,20 +209,33 @@ private slots:
                         "echo 'printer Office-Laser is idle. enabled since today'\n"
                         "echo 'system default destination: EPSON-L385-Series'\n");
 
+        writeExecutable(fakeLpoptions,
+                        "#!/bin/sh\n"
+                        "echo 'MediaType/Type: *PLAIN EMATTE EPREMGLOSS ENVELOPE'\n"
+                        "echo 'PrintQuality/Quality Option: Draft *Standard High'\n"
+                        "echo 'Duplex/2-Sided Printing: *None DuplexNoTumble DuplexTumble'\n");
+
         writeExecutable(fakeLp,
                         "#!/bin/sh\n"
                         "printf '%s\\n' \"$@\" > '" + argsLog.toUtf8() + "'\n"
                         "echo 'request id is EPSON-L385-Series-42 (1 file(s))'\n");
 
-        Backend backend(nullptr, fakeLpstat, fakeLp);
+        Backend backend(nullptr, fakeLpstat, fakeLp, fakeLpoptions);
         QTRY_COMPARE(backend.printers().size(), 2);
         QCOMPARE(backend.defaultPrinter(), QString("EPSON-L385-Series"));
         QCOMPARE(backend.printer(), QString("EPSON-L385-Series"));
+
+        QTRY_VERIFY(backend.hasPrinterOptions());
+        QCOMPARE(backend.mediaType(), QString("PLAIN"));
+        QCOMPARE(backend.printQuality(), QString("Standard"));
+        QCOMPARE(backend.duplex(), QString("None"));
 
         QVERIFY(backend.openFiles({imgPath}));
         backend.setCopies(2);
         backend.setPaperSize("4x6");
         backend.setGrayscale(true);
+        backend.setMediaType("EPREMGLOSS");
+        backend.setPrintQuality("High");
         backend.printCurrent();
 
         QTRY_VERIFY(!backend.printBusy());
@@ -180,15 +247,20 @@ private slots:
         QVERIFY(logged.contains("media=4x6in"));
         QVERIFY(logged.contains("print-scaling=none"));
         QVERIFY(logged.contains("ColorModel=Gray"));
+        QVERIFY(logged.contains("MediaType=EPREMGLOSS"));
+        QVERIFY(logged.contains("PrintQuality=High"));
     }
 
-    void cliExportsPdfHeadlessly() {
+    void cliExportsMultiUpPdfHeadlessly() {
         QTemporaryDir dir;
-        const QString imgPath = makeImage(dir.path(), "cli.png", 500, 300, Qt::magenta);
+        const QString p1 = makeImage(dir.path(), "cli1.png", 500, 300, Qt::magenta);
+        const QString p2 = makeImage(dir.path(), "cli2.png", 500, 300, Qt::cyan);
         const QString outPdf = dir.filePath("cli_out.pdf");
 
         QStringList guiFiles;
-        const auto code = Cli::run({"peek", "export", imgPath, "-o", outPdf, "--paper", "letter", "--grayscale", "--json"}, guiFiles);
+        const auto code = Cli::run({"peek", "export", p1, p2, "-o", outPdf,
+                                    "--paper", "letter", "--per-page", "2", "--cut-guides", "--grayscale", "--json"},
+                                   guiFiles);
         QVERIFY(code.has_value());
         QCOMPARE(*code, 0);
         QVERIFY(readFile(outPdf).startsWith("%PDF-"));

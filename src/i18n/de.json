@@ -36,5 +36,21 @@
   "Cancel": "Abbrechen",
   "Printing…": "Wird gedruckt…",
   "Keyboard Shortcuts": "Tastenkürzel",
-  "Quit": "Beenden"
+  "Quit": "Beenden",
+  "Images per Sheet": "Bilder pro Blatt",
+  "Cut Guides: On": "Schnittlinien: Ein",
+  "Cut Guides: Off": "Schnittlinien: Aus",
+  "Repeat Current": "Aktuelles wiederholen",
+  "Selected (%1)": "Ausgewählt (%1)",
+  "All Images (%1)": "Alle Bilder (%1)",
+  "Printer Options": "Druckeroptionen",
+  "Media Type": "Papiertyp",
+  "Print Quality": "Druckqualität",
+  "Two-Sided": "Beidseitig",
+  "Page %1 / %2": "Seite %1 / %2",
+  "Print Selection": "Auswahl drucken",
+  "All": "Alle",
+  "Clear": "Leeren",
+  "%n images": { "one": "%n Bild", "other": "%n Bilder" },
+  "%n selected": { "one": "%n ausgewählt", "other": "%n ausgewählt" }
 }

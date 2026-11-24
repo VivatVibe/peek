@@ -36,10 +36,10 @@ void printUsage() {
     out << "Usage:\n"
         << "  peek [open] [image ...]              Open images in the viewer\n"
         << "  peek printers [--json]               List CUPS printers\n"
-        << "  peek export <image> -o <out.pdf> [options] [--json]\n"
+        << "  peek export <image ...> -o <out.pdf> [options] [--json]\n"
         << "                                       Export a print-ready PDF\n"
-        << "  peek print <image> [--printer NAME] [--copies N] [options] [--json]\n"
-        << "                                       Print an image via CUPS\n"
+        << "  peek print <image ...> [--printer NAME] [--copies N] [options] [--json]\n"
+        << "                                       Print image(s) via CUPS\n"
         << "  peek skill install                   Install the Peek agent skill\n"
         << "\n"
         << "Layout options:\n"
@@ -48,6 +48,8 @@ void printUsage() {
         << "  --fit fit|fill|scale\n"
         << "  --scale <10-200>\n"
         << "  --margins standard|narrow|borderless\n"
+        << "  --per-page 1|2|4|6|9                 Images per sheet (repeat single or pack multiple)\n"
+        << "  --cut-guides                         Draw dashed trim guides between cells\n"
         << "  --grayscale\n"
         << "  --rotate <0|90|180|270>\n";
 }
@@ -102,6 +104,8 @@ bool parseLayoutOptions(const QStringList &args,
             json = true;
         } else if (arg == "--grayscale") {
             settings.grayscale = true;
+        } else if (arg == "--cut-guides") {
+            settings.cutGuides = true;
         } else if (arg == "-o" || arg == "--output") {
             if (!requireValue(outputPath))
                 return false;
@@ -140,6 +144,17 @@ bool parseLayoutOptions(const QStringList &args,
             if (!requireValue(v))
                 return false;
             settings.marginMode = (v == "narrow" || v == "borderless") ? v : "standard";
+        } else if (arg == "--per-page") {
+            QString v;
+            if (!requireValue(v))
+                return false;
+            bool ok = false;
+            const int n = v.toInt(&ok);
+            if (!ok || (n != 1 && n != 2 && n != 4 && n != 6 && n != 9)) {
+                error = "Per-page must be 1, 2, 4, 6, or 9.";
+                return false;
+            }
+            settings.perPage = n;
         } else if (arg == "--copies" || arg == "-n") {
             QString v;
             if (!requireValue(v))
@@ -237,7 +252,7 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
     }
     if (cmd == "--version" || cmd == "-v") {
         QTextStream out(stdout);
-        out << "peek 0.1.0\n";
+        out << "peek 0.2.0\n";
         return 0;
     }
     if (cmd == "open") {
@@ -285,20 +300,24 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
             return 1;
         }
         if (positionals.isEmpty()) {
-            printError("Specify an image file.", json);
+            printError("Specify at least one image file.", json);
             return 1;
         }
 
-        const QString imagePath = positionals.first();
-        QImageReader reader(imagePath);
-        reader.setAutoTransform(true);
-        const QImage loaded = reader.read();
-        if (loaded.isNull()) {
-            printError("Could not read image: " + reader.errorString(), json);
-            return 1;
+        QVector<QImage> images;
+        for (const QString &imagePath : positionals) {
+            QImageReader reader(imagePath);
+            reader.setAutoTransform(true);
+            const QImage loaded = reader.read();
+            if (loaded.isNull()) {
+                printError("Could not read image " + imagePath + ": " + reader.errorString(), json);
+                return 1;
+            }
+            images.append(PrintRenderer::applyTransforms(loaded, rotation, false, false, settings.grayscale));
         }
 
-        const QImage transformed = PrintRenderer::applyTransforms(loaded, rotation, false, false, settings.grayscale);
+        const bool repeatSingle = images.size() == 1;
+        const QVector<QVector<QImage>> pages = PrintRenderer::paginateImages(images, settings.perPage, repeatSingle);
 
         if (cmd == "export") {
             if (outputPath.isEmpty()) {
@@ -306,12 +325,14 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
                 return 1;
             }
             QString exportError;
-            if (!PrintRenderer::exportPdf(outputPath, transformed, settings, &exportError)) {
+            if (!PrintRenderer::exportPdf(outputPath, pages, settings, &exportError)) {
                 printError(exportError, json);
                 return 1;
             }
             if (json) {
-                printJson({{"ok", true}, {"output", QFileInfo(outputPath).absoluteFilePath()}});
+                printJson({{"ok", true},
+                           {"output", QFileInfo(outputPath).absoluteFilePath()},
+                           {"pages", static_cast<int>(pages.size())}});
             } else {
                 QTextStream out(stdout);
                 out << "Exported " << QFileInfo(outputPath).absoluteFilePath() << '\n';
@@ -319,7 +340,7 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
             return 0;
         }
 
-        // Print subcommand
+        // Print subcommand.
         const QString lp = QStandardPaths::findExecutable("lp");
         if (lp.isEmpty()) {
             printError("CUPS (lp) is not installed.", json);
@@ -339,7 +360,7 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
         const QString tempPdf = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
                                     .filePath("peek-cli-" + QUuid::createUuid().toString(QUuid::Id128) + ".pdf");
         QString exportError;
-        if (!PrintRenderer::exportPdf(tempPdf, transformed, settings, &exportError)) {
+        if (!PrintRenderer::exportPdf(tempPdf, pages, settings, &exportError)) {
             printError(exportError, json);
             return 1;
         }
@@ -348,7 +369,7 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert("LC_ALL", "C");
         proc.setProcessEnvironment(env);
-        proc.start(lp, Backend::buildLpArguments(printerName, settings, tempPdf, QFileInfo(imagePath).fileName()));
+        proc.start(lp, Backend::buildLpArguments(printerName, settings, tempPdf, QFileInfo(positionals.first()).fileName()));
         const bool finished = proc.waitForFinished(15000);
         QFile::remove(tempPdf);
 
@@ -364,7 +385,11 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
         const QString jobId = match.hasMatch() ? match.captured(1) : QString();
 
         if (json) {
-            printJson({{"ok", true}, {"printer", printerName}, {"job", jobId}, {"copies", settings.copies}});
+            printJson({{"ok", true},
+                       {"printer", printerName},
+                       {"job", jobId},
+                       {"pages", static_cast<int>(pages.size())},
+                       {"copies", settings.copies}});
         } else {
             QTextStream out(stdout);
             out << "Sent to " << printerName << (jobId.isEmpty() ? "" : " (" + jobId + ")") << '\n';

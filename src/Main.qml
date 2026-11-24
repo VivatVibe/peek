@@ -5,10 +5,10 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: win
-    width: 1020
+    width: 1040
     height: 700
-    minimumWidth: 680
-    minimumHeight: 480
+    minimumWidth: 720
+    minimumHeight: 500
     visible: true
     title: backend.hasImage ? backend.fileName + " — Peek" : "Peek"
     color: "#0e0e10"
@@ -19,6 +19,8 @@ ApplicationWindow {
 
     property bool helpVisible: false
     property bool printVisible: false
+    property bool sidebarVisible: false
+    property bool selectMode: false
     property bool showCheckerboard: false
 
     // Viewer zoom/pan state: zoomMode "fit" tracks the canvas automatically;
@@ -27,6 +29,13 @@ ApplicationWindow {
     property real zoomScale: 1.0
     property real panX: 0
     property real panY: 0
+
+    // Live rubber-band state while dragging a print selection marquee.
+    property bool draggingSelection: false
+    property real dragStartNormX: 0
+    property real dragStartNormY: 0
+    property real dragCurNormX: 0
+    property real dragCurNormY: 0
 
     readonly property real fitScale: {
         if (!backend.hasImage || backend.imageWidth <= 0 || backend.imageHeight <= 0 || canvasArea.width <= 32 || canvasArea.height <= 32)
@@ -37,6 +46,12 @@ ApplicationWindow {
     }
 
     readonly property real effectiveScale: zoomMode === "fit" ? fitScale : zoomScale
+
+    readonly property bool selectionActive: draggingSelection || backend.hasSelection
+    readonly property real activeSelX: draggingSelection ? Math.min(dragStartNormX, dragCurNormX) : backend.selectionNorm.x
+    readonly property real activeSelY: draggingSelection ? Math.min(dragStartNormY, dragCurNormY) : backend.selectionNorm.y
+    readonly property real activeSelW: draggingSelection ? Math.abs(dragCurNormX - dragStartNormX) : backend.selectionNorm.width
+    readonly property real activeSelH: draggingSelection ? Math.abs(dragCurNormY - dragStartNormY) : backend.selectionNorm.height
 
     function resetView() {
         zoomMode = "fit"
@@ -61,7 +76,6 @@ ApplicationWindow {
         const nextScale = Math.max(0.05, Math.min(16.0, oldScale * factor))
         const ratio = nextScale / oldScale
 
-        // Keep the point under the pointer stationary when zooming.
         const cx = canvasArea.width / 2 + panX
         const cy = canvasArea.height / 2 + panY
         const ax = anchorX !== undefined ? anchorX : (pointerTracker.hovered ? pointerTracker.point.position.x : canvasArea.width / 2)
@@ -79,7 +93,7 @@ ApplicationWindow {
             return
         }
         helpVisible = false
-        backend.refreshPrinters()
+        backend.preparePrintSheet()
         printVisible = true
     }
 
@@ -116,12 +130,27 @@ ApplicationWindow {
     // Keyboard shortcuts.
     Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: { win.printVisible = false; win.helpVisible = !win.helpVisible } }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
-    Shortcut { sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: { if (win.helpVisible) win.helpVisible = false; else if (win.printVisible) win.printVisible = false; else if (backend.errorMessage.length > 0) backend.clearMessages() } }
+    Shortcut {
+        sequence: "Escape"
+        context: Qt.ApplicationShortcut
+        onActivated: {
+            if (win.helpVisible) win.helpVisible = false
+            else if (win.printVisible) win.printVisible = false
+            else if (backend.hasSelection) { backend.clearSelection(); win.selectMode = false }
+            else if (win.selectMode) win.selectMode = false
+            else if (backend.errorMessage.length > 0) backend.clearMessages()
+        }
+    }
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.printVisible && !win.helpVisible; onActivated: win.openPrintSheet() }
     Shortcut { sequences: [StandardKey.Print, "P"]; context: Qt.ApplicationShortcut; enabled: !win.helpVisible; onActivated: { if (win.printVisible) win.printVisible = false; else win.openPrintSheet() } }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && !backend.printBusy && backend.printer.length > 0; onActivated: { backend.printCurrent(); win.printVisible = false } }
     Shortcut { sequences: [StandardKey.Open, "O"]; context: Qt.ApplicationShortcut; enabled: !win.printVisible && !win.helpVisible; onActivated: backend.openFileDialog() }
     Shortcut { sequences: [StandardKey.Save]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.helpVisible; onActivated: backend.savePdfDialog() }
+    Shortcut { sequence: "Tab"; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.printVisible && !win.helpVisible; onActivated: win.sidebarVisible = !win.sidebarVisible }
+    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: win.selectMode = !win.selectMode }
+    Shortcut { sequences: [StandardKey.SelectAll]; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.printVisible && !win.helpVisible; onActivated: { win.sidebarVisible = true; backend.selectAllFiles() } }
+    Shortcut { sequences: ["PgDown"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && backend.previewPageCount > 1; onActivated: backend.nextPreviewPage() }
+    Shortcut { sequences: ["PgUp"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && backend.previewPageCount > 1; onActivated: backend.previousPreviewPage() }
     Shortcut { sequences: ["Right", "L"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: { win.resetView(); backend.nextImage() } }
     Shortcut { sequences: ["Left", "H"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: { win.resetView(); backend.previousImage() } }
     Shortcut { sequences: ["+", "="]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: win.zoomBy(1.25) }
@@ -147,308 +176,444 @@ ApplicationWindow {
             anchors.fill: parent
             spacing: 0
 
-            // Main image stage.
-            Item {
-                id: canvasArea
+            // Middle row: optional Thumbnail Sidebar + Main image stage.
+            RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                clip: true
+                spacing: 0
 
-                HoverHandler {
-                    id: pointerTracker
+                ThumbnailSidebar {
+                    visible: win.sidebarVisible && backend.imageCount > 1
+                    Layout.preferredWidth: 180
+                    Layout.fillHeight: true
+                    onImagePicked: win.resetView()
                 }
 
-                // Empty state when no image is loaded.
                 Item {
-                    anchors.fill: parent
-                    visible: !backend.hasImage
+                    id: canvasArea
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
 
-                    Rectangle {
-                        anchors.centerIn: parent
-                        width: Math.min(parent.width - 64, 440)
-                        height: 270
-                        radius: theme.radius
-                        color: dropArea.containsDrag ? "#1c1c24" : "#15151a"
-                        border.color: dropArea.containsDrag ? theme.accent : "#2a2a33"
-                        border.width: dropArea.containsDrag ? 2 : 1
+                    HoverHandler {
+                        id: pointerTracker
+                    }
 
-                        ColumnLayout {
+                    // Empty state when no image is loaded.
+                    Item {
+                        anchors.fill: parent
+                        visible: !backend.hasImage
+
+                        Rectangle {
                             anchors.centerIn: parent
-                            width: parent.width - 48
-                            spacing: 14
+                            width: Math.min(parent.width - 64, 440)
+                            height: 270
+                            radius: theme.radius
+                            color: dropArea.containsDrag ? "#1c1c24" : "#15151a"
+                            border.color: dropArea.containsDrag ? theme.accent : "#2a2a33"
+                            border.width: dropArea.containsDrag ? 2 : 1
 
-                            // Minimal viewfinder emblem.
-                            Rectangle {
-                                Layout.alignment: Qt.AlignHCenter
-                                width: 56
-                                height: 56
-                                radius: Math.max(theme.radius, 6)
-                                color: "#202028"
-                                border.color: "#32323d"
-                                border.width: 1
+                            ColumnLayout {
+                                anchors.centerIn: parent
+                                width: parent.width - 48
+                                spacing: 14
 
-                                Canvas {
-                                    anchors.fill: parent
-                                    onPaint: {
-                                        const ctx = getContext("2d")
-                                        ctx.clearRect(0, 0, width, height)
-                                        ctx.strokeStyle = theme.accent
-                                        ctx.lineWidth = 2.2
-                                        ctx.lineCap = "round"
-                                        ctx.lineJoin = "round"
-                                        // Frame
-                                        ctx.strokeRect(14, 16, 28, 24)
-                                        // Mountain silhouette
-                                        ctx.beginPath()
-                                        ctx.moveTo(16, 36)
-                                        ctx.lineTo(24, 27)
-                                        ctx.lineTo(30, 33)
-                                        ctx.lineTo(35, 29)
-                                        ctx.lineTo(40, 36)
-                                        ctx.stroke()
-                                        // Sun dot
-                                        ctx.fillStyle = theme.accent
-                                        ctx.beginPath()
-                                        ctx.arc(34, 22, 2.3, 0, Math.PI * 2)
-                                        ctx.fill()
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    width: 56
+                                    height: 56
+                                    radius: Math.max(theme.radius, 6)
+                                    color: "#202028"
+                                    border.color: "#32323d"
+                                    border.width: 1
+
+                                    Canvas {
+                                        anchors.fill: parent
+                                        onPaint: {
+                                            const ctx = getContext("2d")
+                                            ctx.clearRect(0, 0, width, height)
+                                            ctx.strokeStyle = theme.accent
+                                            ctx.lineWidth = 2.2
+                                            ctx.lineCap = "round"
+                                            ctx.lineJoin = "round"
+                                            ctx.strokeRect(14, 16, 28, 24)
+                                            ctx.beginPath()
+                                            ctx.moveTo(16, 36)
+                                            ctx.lineTo(24, 27)
+                                            ctx.lineTo(30, 33)
+                                            ctx.lineTo(35, 29)
+                                            ctx.lineTo(40, 36)
+                                            ctx.stroke()
+                                            ctx.fillStyle = theme.accent
+                                            ctx.beginPath()
+                                            ctx.arc(34, 22, 2.3, 0, Math.PI * 2)
+                                            ctx.fill()
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: qsTr("Drop an image to preview & print")
+                                    color: "#f4f4f6"
+                                    font.pixelSize: 16
+                                    font.weight: Font.DemiBold
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: qsTr("Press O to choose a file, or ? for keyboard shortcuts")
+                                    color: "#8e8e9a"
+                                    font.pixelSize: 13
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                Button {
+                                    id: emptyOpenBtn
+                                    Layout.alignment: Qt.AlignHCenter
+                                    Layout.topMargin: 4
+                                    implicitHeight: 38
+                                    leftPadding: 18
+                                    rightPadding: 18
+                                    Material.roundedScale: Math.min(4, theme.radius)
+                                    text: qsTr("Open Image")
+                                    contentItem: Text {
+                                        text: emptyOpenBtn.text
+                                        color: theme.accentForeground
+                                        font.pixelSize: 13
+                                        font.weight: Font.DemiBold
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        radius: Math.min(4, theme.radius)
+                                        color: theme.accent
+                                        opacity: emptyOpenBtn.down ? 0.85 : (emptyOpenBtn.hovered ? 0.92 : 1.0)
+                                    }
+                                    onClicked: backend.openFileDialog()
+                                }
+                            }
+                        }
+                    }
+
+                    // Image viewport.
+                    Item {
+                        anchors.fill: parent
+                        visible: backend.hasImage
+
+                        // Optional checkerboard behind transparent images.
+                        Canvas {
+                            visible: win.showCheckerboard
+                            x: imageFrame.x
+                            y: imageFrame.y
+                            width: imageFrame.width
+                            height: imageFrame.height
+                            onWidthChanged: requestPaint()
+                            onHeightChanged: requestPaint()
+                            onVisibleChanged: if (visible) requestPaint()
+                            onPaint: {
+                                const ctx = getContext("2d")
+                                const size = 12
+                                for (let py = 0; py < height; py += size) {
+                                    for (let px = 0; px < width; px += size) {
+                                        const even = (((px / size) | 0) + ((py / size) | 0)) % 2 === 0
+                                        ctx.fillStyle = even ? "#2c2c34" : "#1c1c22"
+                                        ctx.fillRect(px, py, size, size)
                                     }
                                 }
                             }
-
-                            Text {
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignHCenter
-                                text: qsTr("Drop an image to preview & print")
-                                color: "#f4f4f6"
-                                font.pixelSize: 16
-                                font.weight: Font.DemiBold
-                                wrapMode: Text.WordWrap
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignHCenter
-                                text: qsTr("Press O to choose a file, or ? for keyboard shortcuts")
-                                color: "#8e8e9a"
-                                font.pixelSize: 13
-                                wrapMode: Text.WordWrap
-                            }
-
-                            Button {
-                                id: emptyOpenBtn
-                                Layout.alignment: Qt.AlignHCenter
-                                Layout.topMargin: 4
-                                implicitHeight: 38
-                                leftPadding: 18
-                                rightPadding: 18
-                                Material.roundedScale: Math.min(4, theme.radius)
-                                text: qsTr("Open Image")
-                                contentItem: Text {
-                                    text: emptyOpenBtn.text
-                                    color: theme.accentForeground
-                                    font.pixelSize: 13
-                                    font.weight: Font.DemiBold
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                background: Rectangle {
-                                    radius: Math.min(4, theme.radius)
-                                    color: theme.accent
-                                    opacity: emptyOpenBtn.down ? 0.85 : (emptyOpenBtn.hovered ? 0.92 : 1.0)
-                                }
-                                onClicked: backend.openFileDialog()
-                            }
-                        }
-                    }
-                }
-
-                // Image viewport.
-                Item {
-                    anchors.fill: parent
-                    visible: backend.hasImage
-
-                    // Optional checkerboard behind transparent images.
-                    Canvas {
-                        visible: win.showCheckerboard
-                        x: imageFrame.x
-                        y: imageFrame.y
-                        width: imageFrame.width
-                        height: imageFrame.height
-                        onWidthChanged: requestPaint()
-                        onHeightChanged: requestPaint()
-                        onVisibleChanged: if (visible) requestPaint()
-                        onPaint: {
-                            const ctx = getContext("2d")
-                            const size = 12
-                            for (let py = 0; py < height; py += size) {
-                                for (let px = 0; px < width; px += size) {
-                                    const even = (((px / size) | 0) + ((py / size) | 0)) % 2 === 0
-                                    ctx.fillStyle = even ? "#2c2c34" : "#1c1c22"
-                                    ctx.fillRect(px, py, size, size)
-                                }
-                            }
-                        }
-                    }
-
-                    Image {
-                        id: imageFrame
-                        width: Math.max(1, backend.imageWidth * win.effectiveScale)
-                        height: Math.max(1, backend.imageHeight * win.effectiveScale)
-                        x: (canvasArea.width - width) / 2 + win.panX
-                        y: (canvasArea.height - height) / 2 + win.panY
-                        source: backend.hasImage ? ("image://peek/current?v=" + backend.imageVersion) : ""
-                        cache: false
-                        asynchronous: false
-                        smooth: true
-                        mipmap: true
-                        fillMode: Image.Stretch
-                    }
-
-                    // Pan, double-click zoom toggle, and wheel zoom toward pointer.
-                    MouseArea {
-                        id: panArea
-                        anchors.fill: parent
-                        acceptedButtons: Qt.LeftButton
-                        cursorShape: pressed ? Qt.ClosedHandCursor : (win.zoomMode === "manual" ? Qt.OpenHandCursor : Qt.ArrowCursor)
-
-                        property real lastX: 0
-                        property real lastY: 0
-
-                        onPressed: function(mouse) {
-                            lastX = mouse.x
-                            lastY = mouse.y
                         }
 
-                        onPositionChanged: function(mouse) {
-                            if (pressed && backend.hasImage) {
-                                win.zoomMode = "manual"
-                                win.zoomScale = win.effectiveScale
-                                win.panX += (mouse.x - lastX)
-                                win.panY += (mouse.y - lastY)
+                        Image {
+                            id: imageFrame
+                            width: Math.max(1, backend.imageWidth * win.effectiveScale)
+                            height: Math.max(1, backend.imageHeight * win.effectiveScale)
+                            x: (canvasArea.width - width) / 2 + win.panX
+                            y: (canvasArea.height - height) / 2 + win.panY
+                            source: backend.hasImage ? ("image://peek/current?v=" + backend.imageVersion) : ""
+                            cache: false
+                            asynchronous: false
+                            smooth: true
+                            mipmap: true
+                            fillMode: Image.Stretch
+                        }
+
+                        // Pan, double-click zoom toggle, wheel zoom toward pointer,
+                        // and rectangular region selection (Select mode or Shift+Drag).
+                        MouseArea {
+                            id: panArea
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            cursorShape: (win.selectMode || win.draggingSelection)
+                                         ? Qt.CrossCursor
+                                         : (pressed ? Qt.ClosedHandCursor : (win.zoomMode === "manual" ? Qt.OpenHandCursor : Qt.ArrowCursor))
+
+                            property real lastX: 0
+                            property real lastY: 0
+                            property bool isSelectingDrag: false
+
+                            function toImageNormX(px) {
+                                return Math.max(0.0, Math.min(1.0, (px - imageFrame.x) / Math.max(1.0, imageFrame.width)))
+                            }
+                            function toImageNormY(py) {
+                                return Math.max(0.0, Math.min(1.0, (py - imageFrame.y) / Math.max(1.0, imageFrame.height)))
+                            }
+
+                            onPressed: function(mouse) {
                                 lastX = mouse.x
                                 lastY = mouse.y
+                                if (win.selectMode || (mouse.modifiers & Qt.ShiftModifier)) {
+                                    isSelectingDrag = true
+                                    win.draggingSelection = true
+                                    win.dragStartNormX = toImageNormX(mouse.x)
+                                    win.dragStartNormY = toImageNormY(mouse.y)
+                                    win.dragCurNormX = win.dragStartNormX
+                                    win.dragCurNormY = win.dragStartNormY
+                                } else {
+                                    isSelectingDrag = false
+                                }
+                            }
+
+                            onPositionChanged: function(mouse) {
+                                if (!pressed || !backend.hasImage)
+                                    return
+                                if (isSelectingDrag) {
+                                    win.dragCurNormX = toImageNormX(mouse.x)
+                                    win.dragCurNormY = toImageNormY(mouse.y)
+                                } else {
+                                    win.zoomMode = "manual"
+                                    win.zoomScale = win.effectiveScale
+                                    win.panX += (mouse.x - lastX)
+                                    win.panY += (mouse.y - lastY)
+                                    lastX = mouse.x
+                                    lastY = mouse.y
+                                }
+                            }
+
+                            onReleased: {
+                                if (isSelectingDrag) {
+                                    isSelectingDrag = false
+                                    win.draggingSelection = false
+                                    const x = Math.min(win.dragStartNormX, win.dragCurNormX)
+                                    const y = Math.min(win.dragStartNormY, win.dragCurNormY)
+                                    const w = Math.abs(win.dragCurNormX - win.dragStartNormX)
+                                    const h = Math.abs(win.dragCurNormY - win.dragStartNormY)
+                                    backend.setSelectionRect(x, y, w, h)
+                                }
+                            }
+
+                            onDoubleClicked: {
+                                if (win.selectMode)
+                                    return
+                                if (win.zoomMode === "fit")
+                                    win.setActualSize()
+                                else
+                                    win.resetView()
+                            }
+
+                            onWheel: function(wheel) {
+                                const factor = wheel.angleDelta.y > 0 ? 1.15 : (1.0 / 1.15)
+                                win.zoomBy(factor, wheel.x, wheel.y)
                             }
                         }
 
-                        onDoubleClicked: {
-                            if (win.zoomMode === "fit")
-                                win.setActualSize()
-                            else
-                                win.resetView()
+                        // Dimmed mask & selection marquee over imageFrame.
+                        Item {
+                            visible: win.selectionActive
+                            x: imageFrame.x
+                            y: imageFrame.y
+                            width: imageFrame.width
+                            height: imageFrame.height
+
+                            readonly property real sx: win.activeSelX * width
+                            readonly property real sy: win.activeSelY * height
+                            readonly property real sw: win.activeSelW * width
+                            readonly property real sh: win.activeSelH * height
+
+                            // Four outer scrims around the selected box.
+                            Rectangle { x: 0; y: 0; width: parent.width; height: parent.sy; color: "#88000000" }
+                            Rectangle { x: 0; y: parent.sy + parent.sh; width: parent.width; height: Math.max(0, parent.height - parent.sy - parent.sh); color: "#88000000" }
+                            Rectangle { x: 0; y: parent.sy; width: parent.sx; height: parent.sh; color: "#88000000" }
+                            Rectangle { x: parent.sx + parent.sw; y: parent.sy; width: Math.max(0, parent.width - parent.sx - parent.sw); height: parent.sh; color: "#88000000" }
+
+                            Rectangle {
+                                x: parent.sx
+                                y: parent.sy
+                                width: parent.sw
+                                height: parent.sh
+                                color: "transparent"
+                                border.color: theme.accent
+                                border.width: 2
+                            }
                         }
 
-                        onWheel: function(wheel) {
-                            const factor = wheel.angleDelta.y > 0 ? 1.15 : (1.0 / 1.15)
-                            win.zoomBy(factor, wheel.x, wheel.y)
-                        }
-                    }
+                        // Compact floating action bar for an active print selection.
+                        Rectangle {
+                            visible: backend.hasSelection && !win.draggingSelection
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 14
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: selBarRow.implicitWidth + 24
+                            height: 36
+                            radius: Math.min(4, theme.radius)
+                            color: "#e618181f"
+                            border.color: theme.accent
+                            border.width: 1
 
-                    // Subtle previous / next navigation buttons for folders with multiple images.
-                    Rectangle {
-                        visible: backend.imageCount > 1 && (pointerTracker.hovered || prevMa.containsMouse)
-                        anchors.left: parent.left
-                        anchors.leftMargin: 16
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 40
-                        height: 40
-                        radius: Math.min(20, Math.max(theme.radius, 4))
-                        color: prevMa.containsMouse ? "#cc24242c" : "#9916161c"
-                        border.color: "#383842"
-                        border.width: 1
+                            RowLayout {
+                                id: selBarRow
+                                anchors.centerIn: parent
+                                spacing: 12
 
-                        Text {
-                            anchors.centerIn: parent
-                            text: "‹"
-                            color: "#f4f4f6"
-                            font.pixelSize: 22
-                        }
+                                Text {
+                                    text: {
+                                        void translator.language
+                                        const w = Number(backend.selectionPixelWidth).toLocaleString(Qt.locale(), 'f', 0)
+                                        const h = Number(backend.selectionPixelHeight).toLocaleString(Qt.locale(), 'f', 0)
+                                        return qsTr("Selection: %1 × %2").arg(w).arg(h)
+                                    }
+                                    color: "#f0f0f6"
+                                    font.pixelSize: 12
+                                }
 
-                        MouseArea {
-                            id: prevMa
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: { win.resetView(); backend.previousImage() }
-                        }
-                    }
+                                Text {
+                                    text: qsTr("Print Selection")
+                                    color: theme.accent
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: win.openPrintSheet()
+                                    }
+                                }
 
-                    Rectangle {
-                        visible: backend.imageCount > 1 && (pointerTracker.hovered || nextMa.containsMouse)
-                        anchors.right: parent.right
-                        anchors.rightMargin: 16
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 40
-                        height: 40
-                        radius: Math.min(20, Math.max(theme.radius, 4))
-                        color: nextMa.containsMouse ? "#cc24242c" : "#9916161c"
-                        border.color: "#383842"
-                        border.width: 1
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "›"
-                            color: "#f4f4f6"
-                            font.pixelSize: 22
-                        }
-
-                        MouseArea {
-                            id: nextMa
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: { win.resetView(); backend.nextImage() }
-                        }
-                    }
-                }
-
-                // Drag-and-drop overlay anywhere over the canvas.
-                DropArea {
-                    id: dropArea
-                    anchors.fill: parent
-                    onDropped: function(drop) {
-                        if (drop.hasUrls) {
-                            win.resetView()
-                            backend.openUrls(drop.urls)
-                        }
-                    }
-                }
-
-                // Status / error banner floating at top center.
-                Rectangle {
-                    id: toast
-                    readonly property bool isError: backend.errorMessage.length > 0
-                    readonly property string messageText: isError ? backend.errorMessage : backend.statusMessage
-                    visible: messageText.length > 0
-                    anchors.top: parent.top
-                    anchors.topMargin: 14
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: Math.min(parent.width - 40, toastRow.implicitWidth + 28)
-                    height: 38
-                    radius: Math.min(4, theme.radius)
-                    color: isError ? "#3a1b1f" : "#1d251e"
-                    border.color: isError ? "#8c333d" : theme.accent
-                    border.width: 1
-
-                    RowLayout {
-                        id: toastRow
-                        anchors.centerIn: parent
-                        spacing: 10
-
-                        Text {
-                            text: toast.messageText
-                            color: toast.isError ? "#ffc2c8" : "#f4f4f6"
-                            font.pixelSize: 13
-                            elide: Text.ElideRight
+                                Text {
+                                    text: "✕"
+                                    color: "#9a9aa4"
+                                    font.pixelSize: 12
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            backend.clearSelection()
+                                            win.selectMode = false
+                                        }
+                                    }
+                                }
+                            }
                         }
 
-                        Text {
-                            text: "✕"
-                            color: "#9a9aa4"
-                            font.pixelSize: 12
+                        // Subtle previous / next navigation buttons for folders with multiple images.
+                        Rectangle {
+                            visible: backend.imageCount > 1 && !win.selectMode && (pointerTracker.hovered || prevMa.containsMouse)
+                            anchors.left: parent.left
+                            anchors.leftMargin: 16
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 40
+                            height: 40
+                            radius: Math.min(20, Math.max(theme.radius, 4))
+                            color: prevMa.containsMouse ? "#cc24242c" : "#9916161c"
+                            border.color: "#383842"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "‹"
+                                color: "#f4f4f6"
+                                font.pixelSize: 22
+                            }
+
                             MouseArea {
+                                id: prevMa
                                 anchors.fill: parent
+                                hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: backend.clearMessages()
+                                onClicked: { win.resetView(); backend.previousImage() }
+                            }
+                        }
+
+                        Rectangle {
+                            visible: backend.imageCount > 1 && !win.selectMode && (pointerTracker.hovered || nextMa.containsMouse)
+                            anchors.right: parent.right
+                            anchors.rightMargin: 16
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 40
+                            height: 40
+                            radius: Math.min(20, Math.max(theme.radius, 4))
+                            color: nextMa.containsMouse ? "#cc24242c" : "#9916161c"
+                            border.color: "#383842"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "›"
+                                color: "#f4f4f6"
+                                font.pixelSize: 22
+                            }
+
+                            MouseArea {
+                                id: nextMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: { win.resetView(); backend.nextImage() }
+                            }
+                        }
+                    }
+
+                    // Drag-and-drop overlay anywhere over the canvas.
+                    DropArea {
+                        id: dropArea
+                        anchors.fill: parent
+                        onDropped: function(drop) {
+                            if (drop.hasUrls) {
+                                win.resetView()
+                                backend.openUrls(drop.urls)
+                            }
+                        }
+                    }
+
+                    // Status / error banner floating at top center.
+                    Rectangle {
+                        id: toast
+                        readonly property bool isError: backend.errorMessage.length > 0
+                        readonly property string messageText: isError ? backend.errorMessage : backend.statusMessage
+                        visible: messageText.length > 0
+                        anchors.top: parent.top
+                        anchors.topMargin: 14
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: Math.min(parent.width - 40, toastRow.implicitWidth + 28)
+                        height: 38
+                        radius: Math.min(4, theme.radius)
+                        color: isError ? "#3a1b1f" : "#1d251e"
+                        border.color: isError ? "#8c333d" : theme.accent
+                        border.width: 1
+
+                        RowLayout {
+                            id: toastRow
+                            anchors.centerIn: parent
+                            spacing: 10
+
+                            Text {
+                                text: toast.messageText
+                                color: toast.isError ? "#ffc2c8" : "#f4f4f6"
+                                font.pixelSize: 13
+                                elide: Text.ElideRight
+                            }
+
+                            Text {
+                                text: "✕"
+                                color: "#9a9aa4"
+                                font.pixelSize: 12
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: backend.clearMessages()
+                                }
                             }
                         }
                     }
@@ -471,9 +636,24 @@ ApplicationWindow {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 14
+                    anchors.leftMargin: 12
                     anchors.rightMargin: 14
-                    spacing: 8
+                    spacing: 6
+
+                    // Sidebar toggle when multiple images exist.
+                    ToolButton {
+                        visible: backend.imageCount > 1
+                        Material.roundedScale: Math.min(4, theme.radius)
+                        implicitWidth: 36
+                        implicitHeight: 36
+                        text: "▤"
+                        font.pixelSize: 15
+                        highlighted: win.sidebarVisible
+                        Material.accent: theme.accent
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("Thumbnails (Tab)")
+                        onClicked: win.sidebarVisible = !win.sidebarVisible
+                    }
 
                     // Left: Open + file metadata.
                     Button {
@@ -522,10 +702,23 @@ ApplicationWindow {
                         visible: !backend.hasImage
                     }
 
-                    // Center: Quick transform and zoom controls.
+                    // Center: Select region, transform, and zoom controls.
                     RowLayout {
                         visible: backend.hasImage
-                        spacing: 4
+                        spacing: 2
+
+                        ToolButton {
+                            Material.roundedScale: Math.min(4, theme.radius)
+                            implicitWidth: 36
+                            implicitHeight: 36
+                            text: "⬚"
+                            font.pixelSize: 16
+                            highlighted: win.selectMode || backend.hasSelection
+                            Material.accent: theme.accent
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Select Region to Print (S)")
+                            onClicked: win.selectMode = !win.selectMode
+                        }
 
                         ToolButton {
                             Material.roundedScale: Math.min(4, theme.radius)
@@ -557,7 +750,7 @@ ApplicationWindow {
                         Button {
                             Material.roundedScale: Math.min(4, theme.radius)
                             flat: true
-                            implicitWidth: 64
+                            implicitWidth: 62
                             text: {
                                 void translator.language
                                 const pct = Math.round(win.effectiveScale * 100)
@@ -586,7 +779,14 @@ ApplicationWindow {
                         leftPadding: 16
                         rightPadding: 16
                         enabled: backend.hasImage
-                        text: qsTr("Print")
+                        text: {
+                            void translator.language
+                            if (backend.selectedCount > 1) {
+                                const c = Number(backend.selectedCount).toLocaleString(Qt.locale(), 'f', 0)
+                                return qsTr("Print (%1)").arg(c)
+                            }
+                            return qsTr("Print")
+                        }
                         contentItem: Text {
                             text: toolbarPrintBtn.text
                             color: toolbarPrintBtn.enabled ? theme.accentForeground : "#6e6e7a"

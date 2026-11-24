@@ -54,5 +54,35 @@
   "Keyboard Shortcuts": "اختصارات لوحة المفاتيح",
   "Sent to %1 (%2)": "تم الإرسال إلى %1 (%2)",
   "Sent to %1": "تم الإرسال إلى %1",
-  "Saved PDF to %1": "تم حفظ PDF في %1"
+  "Saved PDF to %1": "تم حفظ PDF في %1",
+  "Images per Sheet": "صور في كل ورقة",
+  "Cut Guides: On": "خطوط القص: تشغيل",
+  "Cut Guides: Off": "خطوط القص: إيقاف",
+  "Repeat Current": "تكرار الحالية",
+  "Selected (%1)": "المحددة (%1)",
+  "All Images (%1)": "كل الصور (%1)",
+  "Printer Options": "خيارات الطابعة",
+  "Media Type": "نوع الورق",
+  "Print Quality": "جودة الطباعة",
+  "Two-Sided": "طباعة على الوجهين",
+  "Page %1 / %2": "صفحة %1 / %2",
+  "Print Selection": "طباعة التحديد",
+  "All": "الكل",
+  "Clear": "مسح",
+  "%n images": {
+    "zero": "%n صور",
+    "one": "صورة واحدة",
+    "two": "صورتان",
+    "few": "%n صور",
+    "many": "%n صورة",
+    "other": "%n صورة"
+  },
+  "%n selected": {
+    "zero": "%n محددة",
+    "one": "صورة واحدة محددة",
+    "two": "صورتان محددتان",
+    "few": "%n محددة",
+    "many": "%n محددة",
+    "other": "%n محددة"
+  }
 }

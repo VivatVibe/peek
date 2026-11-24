@@ -30,5 +30,21 @@
   "Cancel": "Annuler",
   "Printing…": "Impression…",
   "Keyboard Shortcuts": "Raccourcis clavier",
-  "Quit": "Quitter"
+  "Quit": "Quitter",
+  "Images per Sheet": "Images par feuille",
+  "Cut Guides: On": "Repères de coupe : Oui",
+  "Cut Guides: Off": "Repères de coupe : Non",
+  "Repeat Current": "Répéter l’image",
+  "Selected (%1)": "Sélection (%1)",
+  "All Images (%1)": "Toutes (%1)",
+  "Printer Options": "Options d’imprimante",
+  "Media Type": "Type de papier",
+  "Print Quality": "Qualité d’impression",
+  "Two-Sided": "Recto verso",
+  "Page %1 / %2": "Page %1 / %2",
+  "Print Selection": "Imprimer la sélection",
+  "All": "Tout",
+  "Clear": "Effacer",
+  "%n images": { "one": "%n image", "other": "%n images" },
+  "%n selected": { "one": "%n sélectionnée", "other": "%n sélectionnées" }
 }

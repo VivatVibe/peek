@@ -29,5 +29,21 @@
   "Cancel": "キャンセル",
   "Printing…": "印刷中…",
   "Keyboard Shortcuts": "キーボードショートカット",
-  "Quit": "終了"
+  "Quit": "終了",
+  "Images per Sheet": "1枚あたりの画像数",
+  "Cut Guides: On": "カット線: オン",
+  "Cut Guides: Off": "カット線: オフ",
+  "Repeat Current": "現在の画像を繰り返し",
+  "Selected (%1)": "選択中 (%1)",
+  "All Images (%1)": "すべての画像 (%1)",
+  "Printer Options": "プリンター設定",
+  "Media Type": "用紙種類",
+  "Print Quality": "印刷品質",
+  "Two-Sided": "両面印刷",
+  "Page %1 / %2": "ページ %1 / %2",
+  "Print Selection": "選択範囲を印刷",
+  "All": "すべて",
+  "Clear": "解除",
+  "%n images": { "other": "%n 枚の画像" },
+  "%n selected": { "other": "%n 枚選択中" }
 }

@@ -2,5 +2,13 @@
   "%n copies": {
     "one": "%n copy",
     "other": "%n copies"
+  },
+  "%n images": {
+    "one": "%n image",
+    "other": "%n images"
+  },
+  "%n selected": {
+    "one": "%n selected",
+    "other": "%n selected"
   }
 }

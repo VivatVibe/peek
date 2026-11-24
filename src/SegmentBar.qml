@@ -11,7 +11,7 @@ Rectangle {
     property string currentValue: ""
     signal selected(string value)
 
-    implicitHeight: 34
+    implicitHeight: 30
     radius: Math.min(4, theme.radius)
     color: "#111115"
     border.color: "#2c2c34"

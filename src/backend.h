@@ -3,12 +3,16 @@
 #include "filepicker.h"
 #include "printrenderer.h"
 
+#include <QHash>
 #include <QImage>
 #include <QObject>
 #include <QProcess>
 #include <QQuickImageProvider>
+#include <QRectF>
+#include <QSet>
 #include <QStringList>
 #include <QUrl>
+#include <QVariantList>
 #include <QVector>
 
 struct TransformState {
@@ -21,6 +25,12 @@ struct TransformState {
     }
 };
 
+struct CupsOption {
+    QString key;
+    QStringList values;
+    QString defaultValue;
+};
+
 class Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool hasImage READ hasImage NOTIFY imageChanged)
@@ -29,18 +39,37 @@ class Backend : public QObject {
     Q_PROPERTY(int imageWidth READ imageWidth NOTIFY imageChanged)
     Q_PROPERTY(int imageHeight READ imageHeight NOTIFY imageChanged)
     Q_PROPERTY(int imageVersion READ imageVersion NOTIFY imageChanged)
+    Q_PROPERTY(int fileListVersion READ fileListVersion NOTIFY filesChanged)
     Q_PROPERTY(int imageIndex READ imageIndex NOTIFY imageChanged)
-    Q_PROPERTY(int imageCount READ imageCount NOTIFY imageChanged)
+    Q_PROPERTY(int imageCount READ imageCount NOTIFY filesChanged)
+    Q_PROPERTY(QVariantList fileItems READ fileItems NOTIFY filesChanged)
+    Q_PROPERTY(int selectedCount READ selectedCount NOTIFY filesChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY imageChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY imageChanged)
     Q_PROPERTY(bool isTransformed READ isTransformed NOTIFY imageChanged)
     Q_PROPERTY(int rotation READ rotation NOTIFY imageChanged)
 
+    // Selection region in normalized image coordinates (0..1).
+    Q_PROPERTY(bool hasSelection READ hasSelection NOTIFY selectionChanged)
+    Q_PROPERTY(QRectF selectionNorm READ selectionNorm NOTIFY selectionChanged)
+    Q_PROPERTY(int selectionPixelWidth READ selectionPixelWidth NOTIFY selectionChanged)
+    Q_PROPERTY(int selectionPixelHeight READ selectionPixelHeight NOTIFY selectionChanged)
+    Q_PROPERTY(bool printSelectionOnly READ printSelectionOnly WRITE setPrintSelectionOnly NOTIFY printSettingsChanged)
+
+    // Printer discovery & CUPS PPD options.
     Q_PROPERTY(QStringList printers READ printers NOTIFY printersChanged)
     Q_PROPERTY(QString printer READ printer WRITE setPrinter NOTIFY printSettingsChanged)
     Q_PROPERTY(QString defaultPrinter READ defaultPrinter NOTIFY printersChanged)
     Q_PROPERTY(QString printersError READ printersError NOTIFY printersChanged)
+    Q_PROPERTY(bool hasPrinterOptions READ hasPrinterOptions NOTIFY printerOptionsChanged)
+    Q_PROPERTY(QVariantList mediaTypeOptions READ mediaTypeOptions NOTIFY printerOptionsChanged)
+    Q_PROPERTY(QString mediaType READ mediaType WRITE setMediaType NOTIFY printSettingsChanged)
+    Q_PROPERTY(QVariantList qualityOptions READ qualityOptions NOTIFY printerOptionsChanged)
+    Q_PROPERTY(QString printQuality READ printQuality WRITE setPrintQuality NOTIFY printSettingsChanged)
+    Q_PROPERTY(QVariantList duplexOptions READ duplexOptions NOTIFY printerOptionsChanged)
+    Q_PROPERTY(QString duplex READ duplex WRITE setDuplex NOTIFY printSettingsChanged)
 
+    // Print layout settings.
     Q_PROPERTY(int copies READ copies WRITE setCopies NOTIFY printSettingsChanged)
     Q_PROPERTY(QString paperSize READ paperSize WRITE setPaperSize NOTIFY printSettingsChanged)
     Q_PROPERTY(QString orientation READ orientation WRITE setOrientation NOTIFY printSettingsChanged)
@@ -48,6 +77,11 @@ class Backend : public QObject {
     Q_PROPERTY(int scalePercent READ scalePercent WRITE setScalePercent NOTIFY printSettingsChanged)
     Q_PROPERTY(QString marginMode READ marginMode WRITE setMarginMode NOTIFY printSettingsChanged)
     Q_PROPERTY(bool grayscale READ grayscale WRITE setGrayscale NOTIFY printSettingsChanged)
+    Q_PROPERTY(int perPage READ perPage WRITE setPerPage NOTIFY printSettingsChanged)
+    Q_PROPERTY(QString multiMode READ multiMode WRITE setMultiMode NOTIFY printSettingsChanged)
+    Q_PROPERTY(bool cutGuides READ cutGuides WRITE setCutGuides NOTIFY printSettingsChanged)
+    Q_PROPERTY(int previewPageIndex READ previewPageIndex WRITE setPreviewPageIndex NOTIFY printSettingsChanged)
+    Q_PROPERTY(int previewPageCount READ previewPageCount NOTIFY printSettingsChanged)
     Q_PROPERTY(bool effectiveLandscape READ effectiveLandscape NOTIFY printSettingsChanged)
     Q_PROPERTY(double paperWidthMm READ paperWidthMm NOTIFY printSettingsChanged)
     Q_PROPERTY(double paperHeightMm READ paperHeightMm NOTIFY printSettingsChanged)
@@ -60,6 +94,7 @@ public:
     explicit Backend(FilePicker *filePicker = nullptr,
                      const QString &lpstatPath = {},
                      const QString &lpPath = {},
+                     const QString &lpoptionsPath = {},
                      QObject *parent = nullptr);
     ~Backend() override;
 
@@ -69,15 +104,28 @@ public:
     int imageWidth() const { return m_displayImage.width(); }
     int imageHeight() const { return m_displayImage.height(); }
     int imageVersion() const { return m_imageVersion; }
+    int fileListVersion() const { return m_fileListVersion; }
     int imageIndex() const { return m_currentIndex; }
     int imageCount() const { return m_files.size(); }
+    QVariantList fileItems() const;
+    int selectedCount() const { return m_selectedIndices.size(); }
     bool canUndo() const { return !m_undoStack.isEmpty(); }
     bool canRedo() const { return !m_redoStack.isEmpty(); }
     bool isTransformed() const { return !(m_transform == TransformState{}); }
     int rotation() const { return m_transform.rotation; }
 
+    bool hasSelection() const { return !m_selectionNorm.isEmpty(); }
+    QRectF selectionNorm() const { return m_selectionNorm; }
+    int selectionPixelWidth() const;
+    int selectionPixelHeight() const;
+    bool printSelectionOnly() const { return m_printSelectionOnly; }
+    void setPrintSelectionOnly(bool enabled);
+
     QImage displayImage() const { return m_displayImage; }
+    QImage thumbnailForIndex(int index) const;
     QImage printableImage() const;
+    QVector<QVector<QImage>> buildPrintPages() const;
+    QVector<QImage> previewPageImages() const;
     PrintSettings printSettings() const { return m_printSettings; }
 
     QStringList printers() const { return m_printers; }
@@ -85,6 +133,17 @@ public:
     void setPrinter(const QString &name);
     QString defaultPrinter() const { return m_defaultPrinter; }
     QString printersError() const { return m_printersError; }
+
+    bool hasPrinterOptions() const;
+    QVariantList mediaTypeOptions() const;
+    QString mediaType() const { return m_printSettings.mediaTypeValue; }
+    void setMediaType(const QString &value);
+    QVariantList qualityOptions() const;
+    QString printQuality() const { return m_printSettings.qualityValue; }
+    void setPrintQuality(const QString &value);
+    QVariantList duplexOptions() const;
+    QString duplex() const { return m_printSettings.duplexValue; }
+    void setDuplex(const QString &value);
 
     int copies() const { return m_printSettings.copies; }
     void setCopies(int count);
@@ -100,6 +159,15 @@ public:
     void setMarginMode(const QString &mode);
     bool grayscale() const { return m_printSettings.grayscale; }
     void setGrayscale(bool enabled);
+    int perPage() const { return m_printSettings.perPage; }
+    void setPerPage(int count);
+    QString multiMode() const { return m_multiMode; }
+    void setMultiMode(const QString &mode);
+    bool cutGuides() const { return m_printSettings.cutGuides; }
+    void setCutGuides(bool enabled);
+    int previewPageIndex() const { return m_previewPageIndex; }
+    void setPreviewPageIndex(int index);
+    int previewPageCount() const;
     bool effectiveLandscape() const;
     double paperWidthMm() const;
     double paperHeightMm() const;
@@ -111,8 +179,17 @@ public:
     Q_INVOKABLE bool openFiles(const QStringList &paths);
     Q_INVOKABLE bool openUrls(const QList<QUrl> &urls);
     Q_INVOKABLE void openFileDialog();
+    Q_INVOKABLE void selectIndex(int index);
     Q_INVOKABLE void nextImage();
     Q_INVOKABLE void previousImage();
+
+    Q_INVOKABLE void toggleFileSelected(int index);
+    Q_INVOKABLE void selectRangeTo(int index);
+    Q_INVOKABLE void selectAllFiles();
+    Q_INVOKABLE void clearFileSelection();
+
+    Q_INVOKABLE void setSelectionRect(double x, double y, double w, double h);
+    Q_INVOKABLE void clearSelection();
 
     Q_INVOKABLE void rotateLeft();
     Q_INVOKABLE void rotateRight();
@@ -122,6 +199,9 @@ public:
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
 
+    Q_INVOKABLE void preparePrintSheet();
+    Q_INVOKABLE void nextPreviewPage();
+    Q_INVOKABLE void previousPreviewPage();
     Q_INVOKABLE void refreshPrinters();
     Q_INVOKABLE void printCurrent();
     Q_INVOKABLE void savePdfDialog();
@@ -134,10 +214,15 @@ public:
                                         const QString &pdfPath,
                                         const QString &jobTitle);
     static void parseLpstatOutput(const QString &output, QStringList &printers, QString &defaultPrinter);
+    static void parseLpoptionsOutput(const QString &output, QHash<QString, CupsOption> &options);
+    static QString friendlyCupsValue(const QString &value);
 
 signals:
     void imageChanged();
+    void filesChanged();
+    void selectionChanged();
     void printersChanged();
+    void printerOptionsChanged();
     void printSettingsChanged();
     void printStateChanged();
     void messageChanged();
@@ -146,30 +231,50 @@ private:
     bool loadIndex(int index);
     void applyTransformState(const TransformState &next, bool recordUndo);
     void rebuildDisplayImage();
+    void refreshPrinterOptions();
+    void clearPrinterOptions();
+    void clampPreviewPage();
+    QRect selectionPixelRect() const;
+    QVector<int> activeBatchIndices() const;
     void setStatus(const QString &msg);
     void setError(const QString &msg);
 
     FilePicker *m_filePicker = nullptr;
     QString m_lpstatPath;
     QString m_lpPath;
+    QString m_lpoptionsPath;
 
     QStringList m_files;
+    QSet<int> m_selectedIndices;
     int m_currentIndex = -1;
     QImage m_sourceImage;
     QImage m_displayImage;
+    mutable QHash<int, QImage> m_thumbCache;
+    mutable QHash<QString, QImage> m_batchImageCache;
     int m_imageVersion = 0;
+    int m_fileListVersion = 0;
 
     TransformState m_transform;
     QVector<TransformState> m_undoStack;
     QVector<TransformState> m_redoStack;
 
+    QRectF m_selectionNorm;
+    bool m_printSelectionOnly = false;
+
     QStringList m_printers;
     QString m_defaultPrinter;
     QString m_selectedPrinter;
     QString m_printersError;
+    CupsOption m_mediaTypeOpt;
+    CupsOption m_qualityOpt;
+    CupsOption m_duplexOpt;
+
     PrintSettings m_printSettings;
+    QString m_multiMode = "repeat"; // repeat | selected
+    int m_previewPageIndex = 0;
 
     QProcess m_lpstatProcess;
+    QProcess m_lpoptionsProcess;
     QProcess m_lpProcess;
     QString m_activeTempPdf;
     bool m_printBusy = false;
@@ -183,8 +288,19 @@ public:
     explicit PeekImageProvider(Backend *backend)
         : QQuickImageProvider(QQuickImageProvider::Image), m_backend(backend) {}
 
-    QImage requestImage(const QString &, QSize *size, const QSize &) override {
-        QImage img = m_backend ? m_backend->displayImage() : QImage();
+    QImage requestImage(const QString &id, QSize *size, const QSize &) override {
+        QImage img;
+        if (m_backend) {
+            const QString path = id.section('?', 0, 0);
+            if (path.startsWith("thumb/")) {
+                bool ok = false;
+                const int idx = path.mid(6).toInt(&ok);
+                if (ok)
+                    img = m_backend->thumbnailForIndex(idx);
+            } else {
+                img = m_backend->displayImage();
+            }
+        }
         if (size)
             *size = img.size();
         return img;
