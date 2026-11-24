@@ -9,6 +9,7 @@
 #include "cli.h"
 #include "filepicker.h"
 #include "imageops.h"
+#include "presetstore.h"
 #include "printrenderer.h"
 #include "theme.h"
 #include "translator.h"
@@ -61,7 +62,7 @@ private slots:
         QVERIFY(!p1.isEmpty() && !p2.isEmpty());
 
         FakeFilePicker picker;
-        Backend backend(&picker, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions");
+        Backend backend(&picker, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions", dir.filePath("presets.json"));
         QVERIFY(backend.openFiles({p1}));
         QVERIFY(backend.hasImage());
         QCOMPARE(backend.fileName(), QString("01.png"));
@@ -85,7 +86,7 @@ private slots:
         const QString path = makeImage(dir.path(), "sample.png", 300, 150, Qt::green);
         const QByteArray originalBytes = readFile(path);
 
-        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions");
+        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions", dir.filePath("presets.json"));
         QVERIFY(backend.openFiles({path}));
         QCOMPARE(backend.imageWidth(), 300);
         QCOMPARE(backend.imageHeight(), 150);
@@ -124,7 +125,7 @@ private slots:
         QVERIFY(src.save(imgPath));
         const QByteArray originalBytes = readFile(imgPath);
 
-        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions");
+        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions", dir.filePath("presets.json"));
         QVERIFY(backend.openFiles({imgPath}));
         QVERIFY(!backend.hasUnsavedEdits());
 
@@ -241,7 +242,7 @@ private slots:
         for (int i = 1; i <= 5; ++i)
             paths.append(makeImage(dir.path(), QString("0%1.png").arg(i), 400, 200, Qt::blue));
 
-        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions");
+        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions", dir.filePath("presets.json"));
         QVERIFY(backend.openFiles({paths.first()}));
         QCOMPARE(backend.imageCount(), 5);
 
@@ -299,7 +300,7 @@ private slots:
                         "printf '%s\\n' \"$@\" > '" + argsLog.toUtf8() + "'\n"
                         "echo 'request id is EPSON-L385-Series-42 (1 file(s))'\n");
 
-        Backend backend(nullptr, fakeLpstat, fakeLp, fakeLpoptions);
+        Backend backend(nullptr, fakeLpstat, fakeLp, fakeLpoptions, dir.filePath("presets.json"));
         QTRY_COMPARE(backend.printers().size(), 2);
         QCOMPARE(backend.defaultPrinter(), QString("EPSON-L385-Series"));
         QCOMPARE(backend.printer(), QString("EPSON-L385-Series"));
@@ -328,6 +329,92 @@ private slots:
         QVERIFY(logged.contains("ColorModel=Gray"));
         QVERIFY(logged.contains("MediaType=EPREMGLOSS"));
         QVERIFY(logged.contains("PrintQuality=High"));
+    }
+
+    void remembersLastUsedSettingsAndManagesCustomPresets() {
+        QTemporaryDir dir;
+        const QString storePath = dir.filePath("presets.json");
+        const QString fakeLpstat = dir.filePath("lpstat");
+        const QString fakeLpoptions = dir.filePath("lpoptions");
+
+        writeExecutable(fakeLpstat,
+                        "#!/bin/sh\n"
+                        "echo 'printer EPSON-L385-Series is idle. enabled since today'\n"
+                        "echo 'printer Office-Laser is idle. enabled since today'\n"
+                        "echo 'system default destination: Office-Laser'\n");
+
+        writeExecutable(fakeLpoptions,
+                        "#!/bin/sh\n"
+                        "echo 'MediaType/Type: *PLAIN EMATTE EPREMGLOSS ENVELOPE'\n"
+                        "echo 'PrintQuality/Quality Option: Draft *Standard High'\n");
+
+        {
+            Backend first(nullptr, fakeLpstat, "/nonexistent-lp", fakeLpoptions, storePath);
+            QTRY_COMPARE(first.printers().size(), 2);
+            QTRY_VERIFY(first.hasPrinterOptions());
+
+            first.setPrinter("EPSON-L385-Series");
+            QTRY_VERIFY(first.hasPrinterOptions());
+            first.setPaperSize("4x6");
+            first.setMarginMode("borderless");
+            first.setScaleMode("fill");
+            first.setGrayscale(true);
+            first.setPerPage(6);
+            first.setCutGuides(true);
+            first.setCopies(4);
+            first.setExportFormat("webp");
+            first.setExportQuality(75);
+
+            // Save as a named macOS-style custom preset.
+            QVERIFY(first.saveCurrentPreset("ID Photo 6-Up"));
+            QVERIFY(first.activePresetRemovable());
+            QVERIFY(!first.activePresetModified());
+            QCOMPARE(first.activePresetName(), QString("ID Photo 6-Up"));
+
+            // Tweaking a setting marks the preset as modified.
+            first.setGrayscale(false);
+            QVERIFY(first.activePresetModified());
+
+            // Built-in preset applies smart CUPS hints (glossy + high quality).
+            first.applyPreset("builtin:photo-4x6");
+            QCOMPARE(first.paperSize(), QString("4x6"));
+            QCOMPARE(first.marginMode(), QString("borderless"));
+            QCOMPARE(first.scaleMode(), QString("fill"));
+            QCOMPARE(first.mediaType(), QString("EPREMGLOSS"));
+            QCOMPARE(first.printQuality(), QString("High"));
+        }
+
+        // Relaunching Peek restores Last Used Settings (with copies reset to 1 for safety)
+        // and keeps all saved custom presets.
+        {
+            Backend second(nullptr, fakeLpstat, "/nonexistent-lp", fakeLpoptions, storePath);
+            QTRY_COMPARE(second.printers().size(), 2);
+            QCOMPARE(second.printer(), QString("EPSON-L385-Series"));
+            QCOMPARE(second.paperSize(), QString("4x6"));
+            QCOMPARE(second.marginMode(), QString("borderless"));
+            QCOMPARE(second.copies(), 1);
+            QCOMPARE(second.exportFormat(), QString("webp"));
+            QCOMPARE(second.exportQuality(), 75);
+
+            // Re-apply saved custom preset and verify exact settings + copies.
+            QString customId;
+            for (const QVariant &v : second.presets()) {
+                const QVariantMap row = v.toMap();
+                if (row.value("name").toString() == "ID Photo 6-Up")
+                    customId = row.value("id").toString();
+            }
+            QVERIFY(!customId.isEmpty());
+            second.applyPreset(customId);
+            QCOMPARE(second.perPage(), 6);
+            QCOMPARE(second.copies(), 4);
+            QVERIFY(second.grayscale());
+            QVERIFY(second.cutGuides());
+
+            // Deleting custom preset returns cleanly to Last Used Settings.
+            QVERIFY(second.deleteActivePreset());
+            QCOMPARE(second.activePresetId(), QString("last-used"));
+            QVERIFY(!second.activePresetRemovable());
+        }
     }
 
     void cliExportsMultiUpPdfAndConvertedImageHeadlessly() {

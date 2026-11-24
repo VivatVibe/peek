@@ -63,5 +63,15 @@
   "Copy": "コピー",
   "Apply": "適用",
   "Unsaved Edits": "未保存の編集",
-  "Discard & Quit": "破棄して終了"
+  "Discard & Quit": "破棄して終了",
+  "Presets": "プリセット",
+  "(Modified)": "(変更済み)",
+  "Delete": "削除",
+  "Save…": "保存…",
+  "Save": "保存",
+  "Last Used Settings": "前回使用した設定",
+  "Default Settings": "デフォルト設定",
+  "Photo 4×6 Borderless": "写真 4×6 フチなし",
+  "Black & White Draft": "白黒 ドラフト",
+  "4-Up Sheet with Cut Guides": "4枚割付（カット線付き）"
 }

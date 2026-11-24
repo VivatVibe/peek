@@ -182,5 +182,20 @@
   "PNG images": "PNG-billeder",
   "WebP images": "WebP-billeder",
   "TIFF images": "TIFF-billeder",
-  "BMP images": "BMP-billeder"
+  "BMP images": "BMP-billeder",
+  "Presets": "Forudindstillinger",
+  "(Modified)": "(Ændret)",
+  "Delete": "Slet",
+  "Save…": "Gem…",
+  "Save": "Gem",
+  "Preset name (e.g. Glossy A4)": "Navn på forudindstilling (f.eks. Foto A4)",
+  "Last Used Settings": "Sidst anvendte indstillinger",
+  "Default Settings": "Standardindstillinger",
+  "Photo 4×6 Borderless": "Foto 4×6 uden kant",
+  "Black & White Draft": "Sort-hvid kladde",
+  "4-Up Sheet with Cut Guides": "4 pr. ark med skærelinjer",
+  "Enter a name for the preset.": "Indtast et navn til forudindstillingen.",
+  "Could not save preset.": "Kunne ikke gemme forudindstillingen.",
+  "Saved preset \"%1\"": "Gemte forudindstillingen \"%1\"",
+  "Deleted preset \"%1\"": "Slettede forudindstillingen \"%1\""
 }

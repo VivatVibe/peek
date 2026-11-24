@@ -170,13 +170,14 @@ ApplicationWindow {
     }
 
     // Keyboard shortcuts.
-    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: { const next = !win.helpVisible; win.closeAllModals(); win.helpVisible = next } }
-    Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !win.resizeVisible; onActivated: win.requestQuit() }
+    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; enabled: !printSheet.savingPreset; onActivated: { const next = !win.helpVisible; win.closeAllModals(); win.helpVisible = next } }
+    Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !win.resizeVisible && !printSheet.savingPreset; onActivated: win.requestQuit() }
     Shortcut {
         sequence: "Escape"
         context: Qt.ApplicationShortcut
         onActivated: {
-            if (win.modalOpen) win.closeAllModals()
+            if (printSheet.savingPreset) printSheet.savingPreset = false
+            else if (win.modalOpen) win.closeAllModals()
             else if (win.colorVisible) { backend.commitColorEdit(); win.colorVisible = false }
             else if (backend.hasSelection) { backend.clearSelection(); win.selectMode = false }
             else if (win.selectMode) win.selectMode = false
@@ -184,8 +185,8 @@ ApplicationWindow {
         }
     }
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.modalOpen; onActivated: win.openPrintSheet() }
-    Shortcut { sequences: [StandardKey.Print, "P"]; context: Qt.ApplicationShortcut; enabled: !win.helpVisible && !win.resizeVisible && !win.exportVisible; onActivated: { if (win.printVisible) win.printVisible = false; else win.openPrintSheet() } }
-    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && !backend.printBusy && backend.printer.length > 0; onActivated: { backend.printCurrent(); win.printVisible = false } }
+    Shortcut { sequences: [StandardKey.Print, "P"]; context: Qt.ApplicationShortcut; enabled: !win.helpVisible && !win.resizeVisible && !win.exportVisible && !printSheet.savingPreset; onActivated: { if (win.printVisible) win.printVisible = false; else win.openPrintSheet() } }
+    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && !printSheet.savingPreset && !backend.printBusy && backend.printer.length > 0; onActivated: { backend.printCurrent(); win.printVisible = false } }
     Shortcut { sequences: [StandardKey.Open, "O"]; context: Qt.ApplicationShortcut; enabled: !win.modalOpen; onActivated: backend.openFileDialog() }
     Shortcut { sequences: [StandardKey.Save]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.helpVisible && !win.resizeVisible; onActivated: backend.savePdfDialog() }
     Shortcut { sequences: ["Ctrl+Shift+S", "E"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.openExportSheet() }
@@ -1021,8 +1022,12 @@ ApplicationWindow {
         }
 
         PrintSheet {
+            id: printSheet
             visible: win.printVisible
-            onCloseRequested: win.printVisible = false
+            onCloseRequested: {
+                printSheet.savingPreset = false
+                win.printVisible = false
+            }
         }
 
         ResizeSheet {

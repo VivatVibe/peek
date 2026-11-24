@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("peek");
-    app.setApplicationVersion("0.3.0");
+    app.setApplicationVersion("0.4.0");
 
     QStringList guiFiles;
     if (const auto exitCode = Cli::run(app.arguments(), guiFiles))

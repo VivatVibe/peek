@@ -179,5 +179,20 @@
   "PNG images": "รูปภาพ PNG",
   "WebP images": "รูปภาพ WebP",
   "TIFF images": "รูปภาพ TIFF",
-  "BMP images": "รูปภาพ BMP"
+  "BMP images": "รูปภาพ BMP",
+  "Presets": "พรีเซ็ต",
+  "(Modified)": "(แก้ไขแล้ว)",
+  "Delete": "ลบ",
+  "Save…": "บันทึก…",
+  "Save": "บันทึก",
+  "Preset name (e.g. Glossy A4)": "ชื่อพรีเซ็ต (เช่น รูปถ่าย A4 มันเงา)",
+  "Last Used Settings": "ค่าที่ใช้งานล่าสุด",
+  "Default Settings": "ค่าเริ่มต้น",
+  "Photo 4×6 Borderless": "รูปถ่าย 4×6 ไร้ขอบ",
+  "Black & White Draft": "ขาวดำ แบบร่าง",
+  "4-Up Sheet with Cut Guides": "4 รูปต่อแผ่น พร้อมเส้นตัด",
+  "Enter a name for the preset.": "กรุณาใส่ชื่อพรีเซ็ต",
+  "Could not save preset.": "ไม่สามารถบันทึกพรีเซ็ตได้",
+  "Saved preset \"%1\"": "บันทึกพรีเซ็ต \"%1\" แล้ว",
+  "Deleted preset \"%1\"": "ลบพรีเซ็ต \"%1\" แล้ว"
 }

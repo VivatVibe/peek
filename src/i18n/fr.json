@@ -64,5 +64,15 @@
   "Copy": "Copier",
   "Apply": "Appliquer",
   "Unsaved Edits": "Modifications non enregistrées",
-  "Discard & Quit": "Ignorer et quitter"
+  "Discard & Quit": "Ignorer et quitter",
+  "Presets": "Préréglages",
+  "(Modified)": "(Modifié)",
+  "Delete": "Supprimer",
+  "Save…": "Enregistrer…",
+  "Save": "Enregistrer",
+  "Last Used Settings": "Derniers réglages utilisés",
+  "Default Settings": "Réglages par défaut",
+  "Photo 4×6 Borderless": "Photo 4×6 sans bordure",
+  "Black & White Draft": "Brouillon noir et blanc",
+  "4-Up Sheet with Cut Guides": "4 par feuille avec repères"
 }

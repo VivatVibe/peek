@@ -102,5 +102,15 @@
   "Copy": "نسخ",
   "Apply": "تطبيق",
   "Unsaved Edits": "تعديلات غير محفوظة",
-  "Discard & Quit": "تجاهل وخروج"
+  "Discard & Quit": "تجاهل وخروج",
+  "Presets": "الإعدادات المسبقة",
+  "(Modified)": "(معدّل)",
+  "Delete": "حذف",
+  "Save…": "حفظ…",
+  "Save": "حفظ",
+  "Last Used Settings": "آخر إعدادات مستخدمة",
+  "Default Settings": "الإعدادات الافتراضية",
+  "Photo 4×6 Borderless": "صورة 4×6 بلا حدود",
+  "Black & White Draft": "مسودة أبيض وأسود",
+  "4-Up Sheet with Cut Guides": "4 صور في الورقة مع خطوط القص"
 }

@@ -14,6 +14,27 @@ Item {
     anchors.fill: parent
 
     property bool moreOptionsExpanded: false
+    property bool savingPreset: false
+
+    function presetLabel(item) {
+        void translator.language
+        switch (item.id) {
+        case "last-used": return qsTr("Last Used Settings")
+        case "default": return qsTr("Default Settings")
+        case "builtin:photo-4x6": return qsTr("Photo 4×6 Borderless")
+        case "builtin:bw-draft": return qsTr("Black & White Draft")
+        case "builtin:four-up": return qsTr("4-Up Sheet with Cut Guides")
+        default: return item.name
+        }
+    }
+
+    function presetIndex(list, activeId) {
+        for (let i = 0; i < list.length; ++i) {
+            if (list[i].id === activeId)
+                return i
+        }
+        return 0
+    }
 
     function paperLabel(id) {
         switch (id) {
@@ -340,6 +361,148 @@ Item {
                             }
                         }
 
+                        // macOS-style Presets selector (Last Used, Built-ins, and Custom Presets).
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 5
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                Text {
+                                    text: qsTr("Presets")
+                                    color: "#b4b4c0"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                }
+
+                                Text {
+                                    visible: backend.activePresetModified
+                                    text: qsTr("(Modified)")
+                                    color: theme.accent
+                                    font.pixelSize: 11
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                Text {
+                                    visible: backend.activePresetRemovable && !sheet.savingPreset
+                                    text: qsTr("Delete")
+                                    color: "#ff8c98"
+                                    font.pixelSize: 12
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.deleteActivePreset()
+                                    }
+                                }
+
+                                Text {
+                                    text: sheet.savingPreset ? qsTr("Cancel") : qsTr("Save…")
+                                    color: theme.accent
+                                    font.pixelSize: 12
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            sheet.savingPreset = !sheet.savingPreset
+                                            if (sheet.savingPreset) {
+                                                presetNameInput.text = backend.activePresetRemovable ? backend.activePresetName : ""
+                                                presetNameInput.forceActiveFocus()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            ComboBox {
+                                id: presetCombo
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 34
+                                Material.roundedScale: Math.min(4, theme.radius)
+                                model: {
+                                    void translator.language
+                                    return backend.presets.map(function(item) { return sheet.presetLabel(item) })
+                                }
+                                currentIndex: sheet.presetIndex(backend.presets, backend.activePresetId)
+                                onModelChanged: currentIndex = sheet.presetIndex(backend.presets, backend.activePresetId)
+                                onActivated: function(idx) {
+                                    if (idx >= 0 && idx < backend.presets.length) {
+                                        sheet.savingPreset = false
+                                        backend.applyPreset(backend.presets[idx].id)
+                                    }
+                                }
+                            }
+
+                            // Compact inline Save Preset input drawer.
+                            RowLayout {
+                                visible: sheet.savingPreset
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 32
+                                    radius: Math.min(4, theme.radius)
+                                    color: "#111115"
+                                    border.color: presetNameInput.activeFocus ? theme.accent : "#32323d"
+                                    border.width: 1
+
+                                    TextInput {
+                                        id: presetNameInput
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
+                                        verticalAlignment: TextInput.AlignVCenter
+                                        color: "#f4f4f6"
+                                        font.pixelSize: 12
+                                        clip: true
+                                        onAccepted: {
+                                            if (backend.saveCurrentPreset(text))
+                                                sheet.savingPreset = false
+                                        }
+
+                                        Text {
+                                            anchors.fill: parent
+                                            verticalAlignment: Text.AlignVCenter
+                                            visible: !presetNameInput.text
+                                            text: qsTr("Preset name (e.g. Glossy A4)")
+                                            color: "#6e6e7c"
+                                            font.pixelSize: 12
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+
+                                Button {
+                                    id: savePresetConfirmBtn
+                                    Material.roundedScale: Math.min(4, theme.radius)
+                                    implicitHeight: 32
+                                    leftPadding: 12
+                                    rightPadding: 12
+                                    enabled: presetNameInput.text.trim().length > 0
+                                    text: qsTr("Save")
+                                    contentItem: Text {
+                                        text: savePresetConfirmBtn.text
+                                        color: savePresetConfirmBtn.enabled ? theme.accentForeground : "#6e6e7a"
+                                        font.pixelSize: 12
+                                        font.weight: Font.DemiBold
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    background: Rectangle {
+                                        radius: Math.min(4, theme.radius)
+                                        color: savePresetConfirmBtn.enabled ? theme.accent : "#26262f"
+                                    }
+                                    onClicked: {
+                                        if (backend.saveCurrentPreset(presetNameInput.text))
+                                            sheet.savingPreset = false
+                                    }
+                                }
+                            }
+                        }
+
                         // Copies stepper.
                         RowLayout {
                             Layout.fillWidth: true
@@ -562,6 +725,7 @@ Item {
                                     return sheet.paperIds.map(function(id) { return sheet.paperLabel(id) })
                                 }
                                 currentIndex: Math.max(0, sheet.paperIds.indexOf(backend.paperSize))
+                                onModelChanged: currentIndex = Math.max(0, sheet.paperIds.indexOf(backend.paperSize))
                                 onActivated: function(idx) {
                                     if (idx >= 0 && idx < sheet.paperIds.length)
                                         backend.paperSize = sheet.paperIds[idx]

@@ -58,12 +58,32 @@ Backend::Backend(FilePicker *filePicker,
                  const QString &lpstatPath,
                  const QString &lpPath,
                  const QString &lpoptionsPath,
+                 const QString &presetStorePath,
                  QObject *parent)
     : QObject(parent),
       m_filePicker(filePicker),
       m_lpstatPath(!lpstatPath.isEmpty() ? lpstatPath : QStandardPaths::findExecutable("lpstat")),
       m_lpPath(!lpPath.isEmpty() ? lpPath : QStandardPaths::findExecutable("lp")),
-      m_lpoptionsPath(!lpoptionsPath.isEmpty() ? lpoptionsPath : QStandardPaths::findExecutable("lpoptions")) {
+      m_lpoptionsPath(!lpoptionsPath.isEmpty() ? lpoptionsPath : QStandardPaths::findExecutable("lpoptions")),
+      m_presetStore(presetStorePath) {
+    // Restore Last Used Settings automatically on launch, resetting copies to 1
+    // like macOS Preview so a previous multi-copy job isn't repeated by accident.
+    if (m_presetStore.hasLastUsed()) {
+        m_printSettings = m_presetStore.lastUsedSettings();
+        m_printSettings.copies = 1;
+        m_preferredPrinter = m_presetStore.lastUsedPrinter();
+    }
+    m_activePresetId = m_presetStore.activePresetId();
+    PrintPreset checkPreset;
+    if (!m_presetStore.findById(m_activePresetId, checkPreset))
+        m_activePresetId = "last-used";
+
+    if (!m_presetStore.exportFormat().isEmpty()) {
+        m_exportFormat = m_presetStore.exportFormat();
+        m_hasSavedExportFormat = true;
+    }
+    m_exportQuality = m_presetStore.exportQuality();
+
     connect(&m_lpstatProcess, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
         const QString stdoutText = QString::fromUtf8(m_lpstatProcess.readAllStandardOutput());
         const QString stderrText = QString::fromUtf8(m_lpstatProcess.readAllStandardError()).trimmed();
@@ -88,10 +108,14 @@ Backend::Backend(FilePicker *filePicker,
             clearPrinterOptions();
         } else {
             m_printersError.clear();
-            if (m_selectedPrinter.isEmpty() || !m_printers.contains(m_selectedPrinter))
-                m_selectedPrinter = !m_defaultPrinter.isEmpty() && m_printers.contains(m_defaultPrinter)
-                                        ? m_defaultPrinter
-                                        : m_printers.first();
+            if (m_selectedPrinter.isEmpty() || !m_printers.contains(m_selectedPrinter)) {
+                if (!m_preferredPrinter.isEmpty() && m_printers.contains(m_preferredPrinter))
+                    m_selectedPrinter = m_preferredPrinter;
+                else if (!m_defaultPrinter.isEmpty() && m_printers.contains(m_defaultPrinter))
+                    m_selectedPrinter = m_defaultPrinter;
+                else
+                    m_selectedPrinter = m_printers.first();
+            }
             if (m_selectedPrinter != previousPrinter || !hasPrinterOptions())
                 refreshPrinterOptions();
         }
@@ -133,6 +157,9 @@ Backend::Backend(FilePicker *filePicker,
         m_printSettings.duplexKey = m_duplexOpt.key;
         if (!m_duplexOpt.values.contains(m_printSettings.duplexValue))
             m_printSettings.duplexValue = m_duplexOpt.defaultValue;
+
+        if (!m_activePresetModified)
+            applyBuiltInCupsHints(m_activePresetId);
 
         emit printerOptionsChanged();
         emit printSettingsChanged();
@@ -225,6 +252,9 @@ void Backend::setExportFormat(const QString &format) {
     if (norm == m_exportFormat)
         return;
     m_exportFormat = norm;
+    m_hasSavedExportFormat = true;
+    m_presetStore.setExportDefaults(m_exportFormat, m_exportQuality);
+    m_presetStore.save();
     refreshExportEstimate();
 }
 
@@ -233,6 +263,8 @@ void Backend::setExportQuality(int quality) {
     if (clamped == m_exportQuality)
         return;
     m_exportQuality = clamped;
+    m_presetStore.setExportDefaults(m_exportFormat, m_exportQuality);
+    m_presetStore.save();
     refreshExportEstimate();
 }
 
@@ -352,8 +384,10 @@ void Backend::setPrinter(const QString &name) {
     if (name == m_selectedPrinter)
         return;
     m_selectedPrinter = name;
+    m_preferredPrinter = name;
     clearPrinterOptions();
     refreshPrinterOptions();
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -369,6 +403,7 @@ void Backend::setMediaType(const QString &value) {
     if (value == m_printSettings.mediaTypeValue)
         return;
     m_printSettings.mediaTypeValue = value;
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -380,6 +415,7 @@ void Backend::setPrintQuality(const QString &value) {
     if (value == m_printSettings.qualityValue)
         return;
     m_printSettings.qualityValue = value;
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -391,6 +427,7 @@ void Backend::setDuplex(const QString &value) {
     if (value == m_printSettings.duplexValue)
         return;
     m_printSettings.duplexValue = value;
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -399,6 +436,7 @@ void Backend::setCopies(int count) {
     if (clamped == m_printSettings.copies)
         return;
     m_printSettings.copies = clamped;
+    persistLastUsed(false);
     emit printSettingsChanged();
 }
 
@@ -407,6 +445,7 @@ void Backend::setPaperSize(const QString &id) {
     if (normalized == m_printSettings.paperSize)
         return;
     m_printSettings.paperSize = normalized;
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -415,6 +454,7 @@ void Backend::setOrientation(const QString &mode) {
     if (normalized == m_printSettings.orientation)
         return;
     m_printSettings.orientation = normalized;
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -423,6 +463,7 @@ void Backend::setScaleMode(const QString &mode) {
     if (normalized == m_printSettings.scaleMode)
         return;
     m_printSettings.scaleMode = normalized;
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -431,6 +472,7 @@ void Backend::setScalePercent(int percent) {
     if (clamped == m_printSettings.scalePercent)
         return;
     m_printSettings.scalePercent = clamped;
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -439,6 +481,7 @@ void Backend::setMarginMode(const QString &mode) {
     if (normalized == m_printSettings.marginMode)
         return;
     m_printSettings.marginMode = normalized;
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -446,6 +489,7 @@ void Backend::setGrayscale(bool enabled) {
     if (enabled == m_printSettings.grayscale)
         return;
     m_printSettings.grayscale = enabled;
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -455,6 +499,7 @@ void Backend::setPerPage(int count) {
         return;
     m_printSettings.perPage = normalized;
     clampPreviewPage();
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -472,6 +517,7 @@ void Backend::setCutGuides(bool enabled) {
     if (enabled == m_printSettings.cutGuides)
         return;
     m_printSettings.cutGuides = enabled;
+    persistLastUsed(true);
     emit printSettingsChanged();
 }
 
@@ -1097,6 +1143,154 @@ void Backend::clearMessages() {
     emit messageChanged();
 }
 
+QVariantList Backend::presets() const {
+    QVariantList out;
+    for (const auto &p : m_presetStore.allPresets()) {
+        QVariantMap row;
+        row.insert("id", p.id);
+        row.insert("name", p.name);
+        row.insert("builtIn", p.builtIn);
+        row.insert("removable", p.removable);
+        out.append(row);
+    }
+    return out;
+}
+
+QString Backend::activePresetName() const {
+    PrintPreset found;
+    if (m_presetStore.findById(m_activePresetId, found))
+        return found.name;
+    return "Last Used Settings";
+}
+
+bool Backend::activePresetRemovable() const {
+    PrintPreset found;
+    return m_presetStore.findById(m_activePresetId, found) && found.removable;
+}
+
+void Backend::applyPreset(const QString &id) {
+    PrintPreset chosen;
+    if (!m_presetStore.findById(id, chosen))
+        return;
+
+    const QString savedMediaKey = m_printSettings.mediaTypeKey;
+    const QString savedQualityKey = m_printSettings.qualityKey;
+    const QString savedDuplexKey = m_printSettings.duplexKey;
+
+    m_printSettings = chosen.settings;
+    // Keep discovered CUPS option keys and fall back to printer defaults when a
+    // preset doesn't specify a printer-specific PPD override.
+    if (m_printSettings.mediaTypeKey.isEmpty())
+        m_printSettings.mediaTypeKey = savedMediaKey;
+    if (!m_mediaTypeOpt.values.contains(m_printSettings.mediaTypeValue))
+        m_printSettings.mediaTypeValue = m_mediaTypeOpt.defaultValue;
+
+    if (m_printSettings.qualityKey.isEmpty())
+        m_printSettings.qualityKey = savedQualityKey;
+    if (!m_qualityOpt.values.contains(m_printSettings.qualityValue))
+        m_printSettings.qualityValue = m_qualityOpt.defaultValue;
+
+    if (m_printSettings.duplexKey.isEmpty())
+        m_printSettings.duplexKey = savedDuplexKey;
+    if (!m_duplexOpt.values.contains(m_printSettings.duplexValue))
+        m_printSettings.duplexValue = m_duplexOpt.defaultValue;
+
+    applyBuiltInCupsHints(id);
+
+    if (!chosen.printer.isEmpty() && m_printers.contains(chosen.printer) && chosen.printer != m_selectedPrinter) {
+        m_selectedPrinter = chosen.printer;
+        m_preferredPrinter = chosen.printer;
+        refreshPrinterOptions();
+    }
+
+    m_activePresetId = chosen.id;
+    m_activePresetModified = false;
+    m_presetStore.setActivePresetId(m_activePresetId);
+    m_presetStore.setLastUsed(m_printSettings, m_selectedPrinter);
+    m_presetStore.save();
+
+    clampPreviewPage();
+    emit presetsChanged();
+    emit printSettingsChanged();
+}
+
+bool Backend::saveCurrentPreset(const QString &name) {
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty()) {
+        setError(tr("Enter a name for the preset."));
+        return false;
+    }
+
+    const QString newId = m_presetStore.saveCustomPreset(trimmed, m_printSettings, m_selectedPrinter);
+    if (newId.isEmpty()) {
+        setError(tr("Could not save preset."));
+        return false;
+    }
+
+    m_activePresetId = newId;
+    m_activePresetModified = false;
+    m_presetStore.setLastUsed(m_printSettings, m_selectedPrinter);
+    m_presetStore.save();
+
+    emit presetsChanged();
+    setStatus(tr("Saved preset \"%1\"").arg(trimmed));
+    return true;
+}
+
+bool Backend::deleteActivePreset() {
+    if (!activePresetRemovable())
+        return false;
+    const QString removedName = activePresetName();
+    if (!m_presetStore.deleteCustomPreset(m_activePresetId))
+        return false;
+
+    m_activePresetId = "last-used";
+    m_activePresetModified = false;
+    m_presetStore.setActivePresetId(m_activePresetId);
+    m_presetStore.save();
+
+    emit presetsChanged();
+    setStatus(tr("Deleted preset \"%1\"").arg(removedName));
+    return true;
+}
+
+void Backend::persistLastUsed(bool markPresetModified) {
+    m_presetStore.setLastUsed(m_printSettings, m_selectedPrinter);
+    if (markPresetModified && m_activePresetId != "last-used" && !m_activePresetModified) {
+        m_activePresetModified = true;
+        emit presetsChanged();
+    }
+    m_presetStore.save();
+}
+
+void Backend::applyBuiltInCupsHints(const QString &presetId) {
+    auto findMatch = [](const QStringList &values, std::initializer_list<const char *> needles) -> QString {
+        for (const char *needle : needles) {
+            for (const QString &v : values) {
+                if (v.contains(QLatin1String(needle), Qt::CaseInsensitive))
+                    return v;
+            }
+        }
+        return {};
+    };
+
+    if (presetId == "builtin:photo-4x6") {
+        const QString glossy = findMatch(m_mediaTypeOpt.values, {"gloss", "photo"});
+        if (!glossy.isEmpty())
+            m_printSettings.mediaTypeValue = glossy;
+        const QString high = findMatch(m_qualityOpt.values, {"high", "best", "photo"});
+        if (!high.isEmpty())
+            m_printSettings.qualityValue = high;
+    } else if (presetId == "builtin:bw-draft") {
+        const QString plain = findMatch(m_mediaTypeOpt.values, {"plain", "stationery"});
+        if (!plain.isEmpty())
+            m_printSettings.mediaTypeValue = plain;
+        const QString draft = findMatch(m_qualityOpt.values, {"draft", "fast"});
+        if (!draft.isEmpty())
+            m_printSettings.qualityValue = draft;
+    }
+}
+
 QStringList Backend::buildLpArguments(const QString &printer,
                                       const PrintSettings &settings,
                                       const QString &pdfPath,
@@ -1213,7 +1407,8 @@ bool Backend::loadIndex(int index) {
     m_redoStack.clear();
     m_editVersion = 0;
     m_exportedEditVersion = 0;
-    m_exportFormat = loaded.hasAlphaChannel() ? "png" : "jpeg";
+    if (!m_hasSavedExportFormat)
+        m_exportFormat = loaded.hasAlphaChannel() ? "png" : "jpeg";
     clearSelection();
     rebuildPreColorImage();
     rebuildDisplayImageFromPreColor();

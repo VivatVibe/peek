@@ -70,5 +70,15 @@
   "Copy": "Kopieren",
   "Apply": "Anwenden",
   "Unsaved Edits": "Ungesicherte Änderungen",
-  "Discard & Quit": "Verwerfen & Beenden"
+  "Discard & Quit": "Verwerfen & Beenden",
+  "Presets": "Voreinstellungen",
+  "(Modified)": "(Geändert)",
+  "Delete": "Löschen",
+  "Save…": "Speichern…",
+  "Save": "Speichern",
+  "Last Used Settings": "Zuletzt verwendet",
+  "Default Settings": "Standardeinstellungen",
+  "Photo 4×6 Borderless": "Foto 4×6 randlos",
+  "Black & White Draft": "Schwarzweiß-Entwurf",
+  "4-Up Sheet with Cut Guides": "4 pro Blatt mit Schnittlinien"
 }

@@ -13,8 +13,9 @@ description: >
 
 - `peek [open] <image ...>` — Open image(s) in the desktop viewer.
 - `peek printers --json` — List configured CUPS printers and the default destination.
+- `peek presets --json` — List built-in and saved print presets.
 - `peek export <image ...> -o <out> [options] --json` — Export edited image (PNG/JPEG/WebP/TIFF/BMP) or print-ready 300 DPI PDF.
-- `peek print <image ...> [--printer <name>] [--copies <n>] [options] --json` — Render and send image(s) directly to CUPS.
+- `peek print <image ...> [--printer <name>] [--preset <name>] [--copies <n>] [options] --json` — Render and send image(s) directly to CUPS.
 
 ## Edit & export options
 

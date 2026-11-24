@@ -2,6 +2,7 @@
 
 #include "filepicker.h"
 #include "imageops.h"
+#include "presetstore.h"
 #include "printrenderer.h"
 
 #include <QHash>
@@ -97,11 +98,19 @@ class Backend : public QObject {
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY messageChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY messageChanged)
 
+    // macOS-style Print Presets & Last Used memory.
+    Q_PROPERTY(QVariantList presets READ presets NOTIFY presetsChanged)
+    Q_PROPERTY(QString activePresetId READ activePresetId NOTIFY presetsChanged)
+    Q_PROPERTY(QString activePresetName READ activePresetName NOTIFY presetsChanged)
+    Q_PROPERTY(bool activePresetRemovable READ activePresetRemovable NOTIFY presetsChanged)
+    Q_PROPERTY(bool activePresetModified READ activePresetModified NOTIFY presetsChanged)
+
 public:
     explicit Backend(FilePicker *filePicker = nullptr,
                      const QString &lpstatPath = {},
                      const QString &lpPath = {},
                      const QString &lpoptionsPath = {},
+                     const QString &presetStorePath = {},
                      QObject *parent = nullptr);
     ~Backend() override;
 
@@ -199,6 +208,16 @@ public:
     QString statusMessage() const { return m_statusMessage; }
     QString errorMessage() const { return m_errorMessage; }
 
+    QVariantList presets() const;
+    QString activePresetId() const { return m_activePresetId; }
+    QString activePresetName() const;
+    bool activePresetRemovable() const;
+    bool activePresetModified() const { return m_activePresetModified; }
+
+    Q_INVOKABLE void applyPreset(const QString &id);
+    Q_INVOKABLE bool saveCurrentPreset(const QString &name);
+    Q_INVOKABLE bool deleteActivePreset();
+
     Q_INVOKABLE bool openFiles(const QStringList &paths);
     Q_INVOKABLE bool openUrls(const QList<QUrl> &urls);
     Q_INVOKABLE void openFileDialog();
@@ -264,6 +283,7 @@ signals:
     void printersChanged();
     void printerOptionsChanged();
     void printSettingsChanged();
+    void presetsChanged();
     void printStateChanged();
     void messageChanged();
 
@@ -274,6 +294,8 @@ private:
     void rebuildDisplayImageFromPreColor();
     void refreshPrinterOptions();
     void clearPrinterOptions();
+    void persistLastUsed(bool markPresetModified = true);
+    void applyBuiltInCupsHints(const QString &presetId);
     void clampPreviewPage();
     QRect selectionPixelRect() const;
     QVector<int> activeBatchIndices() const;
@@ -284,6 +306,11 @@ private:
     QString m_lpstatPath;
     QString m_lpPath;
     QString m_lpoptionsPath;
+    PresetStore m_presetStore;
+    QString m_preferredPrinter;
+    QString m_activePresetId = "last-used";
+    bool m_activePresetModified = false;
+    bool m_hasSavedExportFormat = false;
 
     QStringList m_files;
     QSet<int> m_selectedIndices;

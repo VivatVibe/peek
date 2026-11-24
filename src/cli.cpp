@@ -1,6 +1,7 @@
 #include "cli.h"
 #include "backend.h"
 #include "imageops.h"
+#include "presetstore.h"
 #include "printrenderer.h"
 
 #include <QDir>
@@ -37,9 +38,10 @@ void printUsage() {
     out << "Usage:\n"
         << "  peek [open] [image ...]              Open images in the viewer\n"
         << "  peek printers [--json]               List CUPS printers\n"
+        << "  peek presets [--json]                List print presets\n"
         << "  peek export <image ...> -o <out> [options] [--json]\n"
         << "                                       Export image (PNG/JPG/WebP/TIFF/BMP) or PDF\n"
-        << "  peek print <image ...> [--printer NAME] [--copies N] [options] [--json]\n"
+        << "  peek print <image ...> [--printer NAME] [--preset NAME] [--copies N] [options] [--json]\n"
         << "                                       Print image(s) via CUPS\n"
         << "  peek skill install                   Install the Peek agent skill\n"
         << "\n"
@@ -56,6 +58,7 @@ void printUsage() {
         << "  --auto-levels                        Auto-balance brightness and contrast\n"
         << "\n"
         << "Print layout options:\n"
+        << "  --preset <name-or-id>                Load a saved or built-in print preset\n"
         << "  --paper a4|letter|4x6|5x7|a5|a3|legal\n"
         << "  --orientation auto|portrait|landscape\n"
         << "  --fit fit|fill|scale\n"
@@ -117,6 +120,22 @@ bool parseDoubleRange(const QString &text, double lo, double hi, double &out, co
 }
 
 bool parseJobOptions(const QStringList &args, CliJobOptions &opts, QString &error) {
+    // Pre-scan for --preset so explicit CLI flags always override preset values.
+    for (int i = 0; i + 1 < args.size(); ++i) {
+        if (args.at(i) == "--preset") {
+            PresetStore store;
+            PrintPreset found;
+            if (!store.findByNameOrId(args.at(i + 1), found)) {
+                error = "Unknown preset: " + args.at(i + 1);
+                return false;
+            }
+            opts.print = found.settings;
+            if (!found.printer.isEmpty())
+                opts.printerName = found.printer;
+            break;
+        }
+    }
+
     for (int i = 0; i < args.size(); ++i) {
         const QString &arg = args.at(i);
         auto requireValue = [&](QString &dest) -> bool {
@@ -130,6 +149,9 @@ bool parseJobOptions(const QStringList &args, CliJobOptions &opts, QString &erro
 
         if (arg == "--json") {
             opts.json = true;
+        } else if (arg == "--preset") {
+            QString ignored;
+            if (!requireValue(ignored)) return false;
         } else if (arg == "--grayscale") {
             opts.print.grayscale = true;
         } else if (arg == "--cut-guides") {
@@ -310,7 +332,7 @@ bool isHeadlessCommand(int argc, char *argv[]) {
     if (argc < 2)
         return false;
     const QString cmd = QString::fromLocal8Bit(argv[1]);
-    return cmd == "printers" || cmd == "export" || cmd == "print" || cmd == "skill" ||
+    return cmd == "printers" || cmd == "presets" || cmd == "export" || cmd == "print" || cmd == "skill" ||
            cmd == "--help" || cmd == "-h" || cmd == "--version" || cmd == "-v";
 }
 
@@ -328,7 +350,7 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
     }
     if (cmd == "--version" || cmd == "-v") {
         QTextStream out(stdout);
-        out << "peek 0.3.0\n";
+        out << "peek 0.4.0\n";
         return 0;
     }
     if (cmd == "open") {
@@ -341,6 +363,28 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
             return installSkill(json);
         printError("Usage: peek skill install", json);
         return 1;
+    }
+    if (cmd == "presets") {
+        const bool json = rest.contains("--json");
+        PresetStore store;
+        const auto all = store.allPresets();
+        if (json) {
+            QJsonArray arr;
+            for (const auto &p : all) {
+                arr.append(QJsonObject{
+                    {"id", p.id},
+                    {"name", p.name},
+                    {"builtIn", p.builtIn},
+                    {"settings", PresetStore::settingsToJson(p.settings, p.printer)}
+                });
+            }
+            printJson({{"ok", true}, {"active", store.activePresetId()}, {"presets", arr}});
+        } else {
+            QTextStream out(stdout);
+            for (const auto &p : all)
+                out << p.name << (p.id == store.activePresetId() ? " (active)" : "") << '\n';
+        }
+        return 0;
     }
     if (cmd == "printers") {
         const bool json = rest.contains("--json");

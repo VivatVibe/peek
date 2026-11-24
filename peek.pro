@@ -10,6 +10,7 @@ HEADERS += \
     src/filepicker.h \
     src/imageops.h \
     src/portalfilepicker.h \
+    src/presetstore.h \
     src/printrenderer.h \
     src/theme.h \
     src/translator.h
@@ -20,6 +21,7 @@ SOURCES += \
     src/imageops.cpp \
     src/main.cpp \
     src/portalfilepicker.cpp \
+    src/presetstore.cpp \
     src/printrenderer.cpp \
     src/theme.cpp \
     src/translator.cpp

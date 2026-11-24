@@ -12,6 +12,7 @@ Fast image preview, quick editing, and effortless printing for Omarchy — inspi
   - **Export & Convert (`E` / `Ctrl+Shift+S`)**: convert to JPEG, PNG, WebP, TIFF, BMP, or PDF with quality slider and live estimated file size; saves atomically and asks before discarding unexported edits on quit (`Q`).
 - **macOS Preview–style print sheet (`Space` / `Ctrl+P`)**:
   - Live paper proof painted by the exact C++ renderer used for PDF/CUPS output.
+  - **Presets & Last Used Settings**: automatically remembers your last print settings and preferred printer across launches (resetting Copies to 1 for safety, like macOS), ships built-in presets (*Photo 4×6 Borderless*, *Black & White Draft*, *4-Up Sheet with Cut Guides*), and lets you save/update/delete your own named presets in `~/.config/peek/presets.json`.
   - **Images per sheet (`1`, `2`, `4`, `6`, `9`)** with optional dashed **cut guides** — repeat the same image across a sheet or pack multiple selected images across sheets with multi-page preview.
   - **Print Selection**: print only the drawn region without cropping the file.
   - **CUPS Printer Options**: automatically reads Media Type, Print Quality, and Two-Sided options via `lpoptions`.
@@ -51,9 +52,10 @@ Peek can also be driven without a display:
 
 ```sh
 peek printers --json
+peek presets --json
 peek export photo.png -o edited.jpg --crop 100,100,800,600 --resize 640x480 --quality 85 --auto-levels --json
-peek export photo.png -o sheet.pdf --paper a4 --per-page 4 --cut-guides --json
-peek print photo.png --copies 2 --paper 4x6 --fit fill --margins borderless --json
+peek export photo.png -o sheet.pdf --preset "4-Up Sheet with Cut Guides" --json
+peek print photo.png --preset "Photo 4×6 Borderless" --copies 2 --json
 peek skill install
 ```
 

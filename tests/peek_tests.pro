@@ -10,6 +10,7 @@ HEADERS += \
     ../src/cli.h \
     ../src/filepicker.h \
     ../src/imageops.h \
+    ../src/presetstore.h \
     ../src/printrenderer.h \
     ../src/theme.h \
     ../src/translator.h
@@ -19,6 +20,7 @@ SOURCES += \
     ../src/backend.cpp \
     ../src/cli.cpp \
     ../src/imageops.cpp \
+    ../src/presetstore.cpp \
     ../src/printrenderer.cpp \
     ../src/theme.cpp \
     ../src/translator.cpp
