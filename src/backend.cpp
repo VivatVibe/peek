@@ -442,10 +442,30 @@ void Backend::setCopies(int count) {
 }
 
 void Backend::setPaperSize(const QString &id) {
+    if (id.startsWith("custom:")) {
+        CustomPaperSize custom;
+        if (!m_presetStore.findCustomPaperById(id, custom))
+            return;
+        if (m_printSettings.paperSize == custom.id &&
+            std::abs(m_printSettings.customPaperWidthMm - custom.widthMm) < 1e-4 &&
+            std::abs(m_printSettings.customPaperHeightMm - custom.heightMm) < 1e-4)
+            return;
+        m_printSettings.paperSize = custom.id;
+        m_printSettings.customPaperWidthMm = custom.widthMm;
+        m_printSettings.customPaperHeightMm = custom.heightMm;
+        persistLastUsed(true);
+        emit printSettingsChanged();
+        return;
+    }
+
     const QString normalized = PrintRenderer::paperSpec(id).id;
-    if (normalized == m_printSettings.paperSize)
+    if (normalized == m_printSettings.paperSize &&
+        m_printSettings.customPaperWidthMm == 0.0 &&
+        m_printSettings.customPaperHeightMm == 0.0)
         return;
     m_printSettings.paperSize = normalized;
+    m_printSettings.customPaperWidthMm = 0.0;
+    m_printSettings.customPaperHeightMm = 0.0;
     persistLastUsed(true);
     emit printSettingsChanged();
 }
@@ -1306,6 +1326,103 @@ bool Backend::deleteActivePreset() {
     return true;
 }
 
+QVariantList Backend::paperOptions() const {
+    QVariantList out;
+    for (const auto &spec : PrintRenderer::allPapers()) {
+        QVariantMap row;
+        row.insert("id", spec.id);
+        row.insert("name", spec.id);
+        row.insert("widthMm", spec.widthMm);
+        row.insert("heightMm", spec.heightMm);
+        row.insert("custom", false);
+        out.append(row);
+    }
+    for (const auto &custom : m_presetStore.customPapers()) {
+        QVariantMap row;
+        row.insert("id", custom.id);
+        row.insert("name", custom.name);
+        row.insert("widthMm", custom.widthMm);
+        row.insert("heightMm", custom.heightMm);
+        row.insert("custom", true);
+        out.append(row);
+    }
+    return out;
+}
+
+bool Backend::activePaperCustom() const {
+    CustomPaperSize found;
+    return m_printSettings.paperSize.startsWith("custom:") &&
+           m_presetStore.findCustomPaperById(m_printSettings.paperSize, found);
+}
+
+QString Backend::activePaperName() const {
+    CustomPaperSize found;
+    if (m_presetStore.findCustomPaperById(m_printSettings.paperSize, found))
+        return found.name;
+    return {};
+}
+
+double Backend::customPaperWidthMm() const {
+    return PrintRenderer::resolvePaperSpec(m_printSettings).widthMm;
+}
+
+double Backend::customPaperHeightMm() const {
+    return PrintRenderer::resolvePaperSpec(m_printSettings).heightMm;
+}
+
+bool Backend::saveCustomPaper(const QString &name, double width, double height, const QString &unit) {
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty()) {
+        setError(tr("Enter a name for the custom paper size."));
+        return false;
+    }
+
+    double scale = 1.0;
+    if (unit == "cm") scale = 10.0;
+    else if (unit == "in") scale = 25.4;
+
+    const double wMm = width * scale;
+    const double hMm = height * scale;
+    if (wMm < 10.0 || hMm < 10.0 || wMm > 2000.0 || hMm > 2000.0) {
+        setError(tr("Paper dimensions must be between 10 mm and 2000 mm."));
+        return false;
+    }
+
+    const QString id = m_presetStore.saveCustomPaper(trimmed, wMm, hMm);
+    if (id.isEmpty()) {
+        setError(tr("Could not save custom paper size."));
+        return false;
+    }
+
+    m_printSettings.paperSize = id;
+    m_printSettings.customPaperWidthMm = wMm;
+    m_printSettings.customPaperHeightMm = hMm;
+    persistLastUsed(true);
+
+    emit papersChanged();
+    emit printSettingsChanged();
+    setStatus(tr("Saved paper size \"%1\"").arg(trimmed));
+    return true;
+}
+
+bool Backend::deleteActiveCustomPaper() {
+    if (!activePaperCustom())
+        return false;
+    const QString removedName = activePaperName();
+    if (!m_presetStore.deleteCustomPaper(m_printSettings.paperSize))
+        return false;
+
+    m_printSettings.paperSize = "a4";
+    m_printSettings.customPaperWidthMm = 0.0;
+    m_printSettings.customPaperHeightMm = 0.0;
+    persistLastUsed(true);
+
+    emit papersChanged();
+    emit printSettingsChanged();
+    setStatus(tr("Deleted paper size \"%1\"").arg(removedName));
+    return true;
+}
+
 void Backend::persistLastUsed(bool markPresetModified) {
     m_presetStore.setLastUsed(m_printSettings, m_selectedPrinter);
     if (markPresetModified && m_activePresetId != "last-used" && !m_activePresetModified) {
@@ -1347,7 +1464,7 @@ QStringList Backend::buildLpArguments(const QString &printer,
                                       const PrintSettings &settings,
                                       const QString &pdfPath,
                                       const QString &jobTitle) {
-    const PaperSpec spec = PrintRenderer::paperSpec(settings.paperSize);
+    const PaperSpec spec = PrintRenderer::resolvePaperSpec(settings);
     QStringList args;
     if (!printer.isEmpty())
         args << "-d" << printer;

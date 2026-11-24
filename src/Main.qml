@@ -35,7 +35,7 @@ ApplicationWindow {
     property bool showCheckerboard: false
 
     readonly property bool modalOpen: helpVisible || printVisible || resizeVisible || exportVisible || quitConfirmVisible
-    readonly property bool typingText: textCalloutOpen || printSheet.savingPreset || resizeVisible
+    readonly property bool typingText: textCalloutOpen || printSheet.savingPreset || printSheet.editingCustomPaper || resizeVisible
 
     // Viewer zoom/pan state.
     property string zoomMode: "fit"
@@ -185,6 +185,7 @@ ApplicationWindow {
         onActivated: {
             if (win.textCalloutOpen) win.textCalloutOpen = false
             else if (printSheet.savingPreset) printSheet.savingPreset = false
+            else if (printSheet.editingCustomPaper) printSheet.editingCustomPaper = false
             else if (win.modalOpen) win.closeAllModals()
             else if (win.colorVisible) { backend.commitColorEdit(); win.colorVisible = false }
             else if (win.inspectorVisible) win.inspectorVisible = false
@@ -196,7 +197,7 @@ ApplicationWindow {
     }
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.modalOpen && !win.typingText; onActivated: win.openPrintSheet() }
     Shortcut { sequences: [StandardKey.Print, "P"]; context: Qt.ApplicationShortcut; enabled: !win.helpVisible && !win.resizeVisible && !win.exportVisible && !win.typingText; onActivated: { if (win.printVisible) win.printVisible = false; else win.openPrintSheet() } }
-    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && !printSheet.savingPreset && !backend.printBusy && backend.printer.length > 0; onActivated: { backend.printCurrent(); win.printVisible = false } }
+    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && !printSheet.savingPreset && !printSheet.editingCustomPaper && !backend.printBusy && backend.printer.length > 0; onActivated: { backend.printCurrent(); win.printVisible = false } }
     Shortcut { sequences: [StandardKey.Open, "O"]; context: Qt.ApplicationShortcut; enabled: !win.modalOpen && !win.typingText; onActivated: backend.openFileDialog() }
     Shortcut { sequences: [StandardKey.Save]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.helpVisible && !win.resizeVisible; onActivated: backend.savePdfDialog() }
     Shortcut { sequences: ["Ctrl+Shift+S", "E"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: win.openExportSheet() }
@@ -1180,6 +1181,7 @@ ApplicationWindow {
             visible: win.printVisible
             onCloseRequested: {
                 printSheet.savingPreset = false
+                printSheet.editingCustomPaper = false
                 win.printVisible = false
             }
         }

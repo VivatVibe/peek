@@ -82,5 +82,8 @@
   "Arrow": "矢印",
   "Line": "直線",
   "Pixelate": "モザイク",
-  "Redact (Blackout)": "墨消し"
+  "Redact (Blackout)": "墨消し",
+  "Custom…": "カスタム…",
+  "Manage Custom Sizes…": "カスタムサイズを管理…",
+  "Save Size": "サイズを保存"
 }

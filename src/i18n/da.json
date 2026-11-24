@@ -229,5 +229,15 @@
   "Markup Toolbar (M)": "Markeringsværktøjer (M)",
   "Inspector (I)": "Vis info og EXIF (I)",
   "Toggle Markup Toolbar": "Vis/skjul markeringsværktøjer",
-  "Toggle Inspector (EXIF)": "Vis/skjul info og EXIF"
+  "Toggle Inspector (EXIF)": "Vis/skjul info og EXIF",
+  "Custom…": "Tilpasset…",
+  "Manage Custom Sizes…": "Administrer brugerdefinerede størrelser…",
+  "Paper name (e.g. Sticker 10×15)": "Papirnavn (f.eks. Etiket 10×15)",
+  "Save Size": "Gem størrelse",
+  "%1 (%2 × %3 mm)": "%1 (%2 × %3 mm)",
+  "Enter a name for the custom paper size.": "Indtast et navn til papirstørrelsen.",
+  "Paper dimensions must be between 10 mm and 2000 mm.": "Papirmål skal være mellem 10 mm og 2000 mm.",
+  "Could not save custom paper size.": "Kunne ikke gemme papirstørrelsen.",
+  "Saved paper size \"%1\"": "Gemte papirstørrelsen \"%1\"",
+  "Deleted paper size \"%1\"": "Slettede papirstørrelsen \"%1\""
 }

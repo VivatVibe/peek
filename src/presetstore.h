@@ -6,6 +6,13 @@
 #include <QString>
 #include <QVector>
 
+struct CustomPaperSize {
+    QString id;       // "custom:<slug>"
+    QString name;     // User-facing label (e.g. "Sticker 100×150")
+    double widthMm = 210.0;
+    double heightMm = 297.0;
+};
+
 struct PrintPreset {
     QString id;       // "last-used" | "default" | "builtin:..." | "user:..."
     QString name;     // Display name (localized in QML for built-in IDs)
@@ -45,6 +52,12 @@ public:
     QString saveCustomPreset(const QString &name, const PrintSettings &settings, const QString &printer);
     bool deleteCustomPreset(const QString &id);
 
+    QVector<CustomPaperSize> customPapers() const { return m_customPapers; }
+    bool findCustomPaperById(const QString &id, CustomPaperSize &out) const;
+    bool findCustomPaperByNameOrId(const QString &query, CustomPaperSize &out) const;
+    QString saveCustomPaper(const QString &name, double widthMm, double heightMm);
+    bool deleteCustomPaper(const QString &id);
+
     static QVector<PrintPreset> builtInPresets();
     static QJsonObject settingsToJson(const PrintSettings &s, const QString &printer);
     static PrintSettings settingsFromJson(const QJsonObject &obj, QString *printerOut = nullptr);
@@ -58,4 +71,5 @@ private:
     QString m_exportFormat;
     int m_exportQuality = 90;
     QVector<PrintPreset> m_customPresets;
+    QVector<CustomPaperSize> m_customPapers;
 };

@@ -89,5 +89,8 @@
   "Arrow": "Pfeil",
   "Line": "Linie",
   "Pixelate": "Verpixeln",
-  "Redact (Blackout)": "Schwärzen"
+  "Redact (Blackout)": "Schwärzen",
+  "Custom…": "Eigene…",
+  "Manage Custom Sizes…": "Eigene Papierformate verwalten…",
+  "Save Size": "Format speichern"
 }

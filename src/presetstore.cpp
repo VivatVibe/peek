@@ -92,6 +92,10 @@ QJsonObject PresetStore::settingsToJson(const PrintSettings &s, const QString &p
     if (!printer.isEmpty())
         obj.insert("printer", printer);
     obj.insert("paperSize", s.paperSize);
+    if (s.paperSize.startsWith("custom") && s.customPaperWidthMm >= 10.0 && s.customPaperHeightMm >= 10.0) {
+        obj.insert("customPaperWidthMm", s.customPaperWidthMm);
+        obj.insert("customPaperHeightMm", s.customPaperHeightMm);
+    }
     obj.insert("orientation", s.orientation);
     obj.insert("scaleMode", s.scaleMode);
     obj.insert("scalePercent", s.scalePercent);
@@ -119,8 +123,21 @@ PrintSettings PresetStore::settingsFromJson(const QJsonObject &obj, QString *pri
     PrintSettings s;
     if (printerOut)
         *printerOut = obj.value("printer").toString();
-    if (obj.contains("paperSize"))
-        s.paperSize = PrintRenderer::paperSpec(obj.value("paperSize").toString()).id;
+    if (obj.contains("paperSize")) {
+        const QString ps = obj.value("paperSize").toString().trimmed();
+        if (ps.startsWith("custom")) {
+            s.paperSize = ps;
+            s.customPaperWidthMm = std::clamp(obj.value("customPaperWidthMm").toDouble(0.0), 0.0, 2000.0);
+            s.customPaperHeightMm = std::clamp(obj.value("customPaperHeightMm").toDouble(0.0), 0.0, 2000.0);
+            if (s.customPaperWidthMm < 10.0 || s.customPaperHeightMm < 10.0) {
+                s.paperSize = "a4";
+                s.customPaperWidthMm = 0.0;
+                s.customPaperHeightMm = 0.0;
+            }
+        } else {
+            s.paperSize = PrintRenderer::paperSpec(ps).id;
+        }
+    }
     const QString orient = obj.value("orientation").toString();
     if (orient == "portrait" || orient == "landscape" || orient == "auto")
         s.orientation = orient;
@@ -153,6 +170,7 @@ bool PresetStore::load() {
     m_exportFormat.clear();
     m_exportQuality = 90;
     m_customPresets.clear();
+    m_customPapers.clear();
 
     QFile file(m_filePath);
     if (!file.open(QIODevice::ReadOnly))
@@ -198,6 +216,26 @@ bool PresetStore::load() {
         m_customPresets.append(preset);
     }
 
+    const QJsonArray papersArr = root.value("customPapers").toArray();
+    for (const QJsonValue &val : papersArr) {
+        if (!val.isObject())
+            continue;
+        const QJsonObject item = val.toObject();
+        const QString name = item.value("name").toString().trimmed();
+        const double w = item.value("widthMm").toDouble(0.0);
+        const double h = item.value("heightMm").toDouble(0.0);
+        if (name.isEmpty() || w < 10.0 || h < 10.0 || w > 2000.0 || h > 2000.0)
+            continue;
+        CustomPaperSize paper;
+        paper.id = item.value("id").toString();
+        if (paper.id.isEmpty())
+            paper.id = "custom:" + slugify(name);
+        paper.name = name;
+        paper.widthMm = w;
+        paper.heightMm = h;
+        m_customPapers.append(paper);
+    }
+
     return true;
 }
 
@@ -225,6 +263,17 @@ bool PresetStore::save() const {
         presetsArr.append(item);
     }
     root.insert("presets", presetsArr);
+
+    QJsonArray papersArr;
+    for (const auto &paper : m_customPapers) {
+        QJsonObject item;
+        item.insert("id", paper.id);
+        item.insert("name", paper.name);
+        item.insert("widthMm", paper.widthMm);
+        item.insert("heightMm", paper.heightMm);
+        papersArr.append(item);
+    }
+    root.insert("customPapers", papersArr);
 
     // Atomic write: write beside target, then rename so settings never corrupt.
     const QString tempPath = parentDir.filePath(
@@ -350,6 +399,76 @@ bool PresetStore::deleteCustomPreset(const QString &id) {
             m_customPresets.removeAt(i);
             if (m_activePresetId == id)
                 m_activePresetId = "last-used";
+            save();
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PresetStore::findCustomPaperById(const QString &id, CustomPaperSize &out) const {
+    for (const auto &paper : m_customPapers) {
+        if (paper.id == id) {
+            out = paper;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PresetStore::findCustomPaperByNameOrId(const QString &query, CustomPaperSize &out) const {
+    const QString q = query.trimmed().toLower();
+    if (q.isEmpty())
+        return false;
+    for (const auto &paper : m_customPapers) {
+        if (paper.id.toLower() == q || paper.name.toLower() == q) {
+            out = paper;
+            return true;
+        }
+    }
+    return false;
+}
+
+QString PresetStore::saveCustomPaper(const QString &rawName, double widthMm, double heightMm) {
+    const QString name = rawName.trimmed();
+    if (name.isEmpty() || widthMm < 10.0 || heightMm < 10.0 || widthMm > 2000.0 || heightMm > 2000.0)
+        return {};
+
+    for (auto &existing : m_customPapers) {
+        if (existing.name.compare(name, Qt::CaseInsensitive) == 0) {
+            existing.name = name;
+            existing.widthMm = widthMm;
+            existing.heightMm = heightMm;
+            save();
+            return existing.id;
+        }
+    }
+
+    QString candidateId = "custom:" + slugify(name);
+    int suffix = 2;
+    auto idExists = [&](const QString &id) {
+        for (const auto &p : m_customPapers)
+            if (p.id == id)
+                return true;
+        return false;
+    };
+    while (idExists(candidateId))
+        candidateId = "custom:" + slugify(name) + "-" + QString::number(suffix++);
+
+    CustomPaperSize created;
+    created.id = candidateId;
+    created.name = name;
+    created.widthMm = widthMm;
+    created.heightMm = heightMm;
+    m_customPapers.append(created);
+    save();
+    return created.id;
+}
+
+bool PresetStore::deleteCustomPaper(const QString &id) {
+    for (int i = 0; i < m_customPapers.size(); ++i) {
+        if (m_customPapers.at(i).id == id) {
+            m_customPapers.removeAt(i);
             save();
             return true;
         }

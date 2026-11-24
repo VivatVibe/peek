@@ -422,6 +422,56 @@ private slots:
         }
     }
 
+    void savesPersistsAndPrintsCustomPaperSizes() {
+        QTemporaryDir dir;
+        const QString storePath = dir.filePath("presets.json");
+        const QString imgPath = makeImage(dir.path(), "label.png", 200, 300, Qt::darkCyan);
+
+        double wMm = 0.0, hMm = 0.0;
+        QVERIFY(PrintRenderer::parseCustomPaperDimensions("10x15cm", wMm, hMm));
+        QCOMPARE(wMm, 100.0);
+        QCOMPARE(hMm, 150.0);
+
+        {
+            Backend first(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions", storePath);
+            QVERIFY(first.openFiles({imgPath}));
+            QVERIFY(first.saveCustomPaper("Sticker 10x15", 10.0, 15.0, "cm"));
+            QVERIFY(first.activePaperCustom());
+            QCOMPARE(first.activePaperName(), QString("Sticker 10x15"));
+            QCOMPARE(first.paperWidthMm(), 100.0);
+            QCOMPARE(first.paperHeightMm(), 150.0);
+
+            const QStringList args = Backend::buildLpArguments("EPSON-L385-Series", first.printSettings(), "/tmp/x.pdf", "label.png");
+            QVERIFY(args.contains("media=Custom.100.0x150.0mm"));
+
+            const QString pdfPath = dir.filePath("custom_size.pdf");
+            QVERIFY(first.savePdfTo(pdfPath));
+            QVERIFY(readFile(pdfPath).startsWith("%PDF-"));
+        }
+
+        // Relaunch restores the custom paper size automatically.
+        {
+            Backend second(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions", storePath);
+            QVERIFY(second.openFiles({imgPath}));
+            QVERIFY(second.activePaperCustom());
+            QCOMPARE(second.activePaperName(), QString("Sticker 10x15"));
+            QCOMPARE(second.paperWidthMm(), 100.0);
+            QCOMPARE(second.paperHeightMm(), 150.0);
+
+            QVERIFY(second.deleteActiveCustomPaper());
+            QVERIFY(!second.activePaperCustom());
+            QCOMPARE(second.paperSize(), QString("a4"));
+        }
+
+        // CLI accepts custom WxHmm directly.
+        QStringList guiFiles;
+        const QString cliPdf = dir.filePath("cli_custom.pdf");
+        const auto code = Cli::run({"peek", "export", imgPath, "-o", cliPdf, "--paper", "100x150mm", "--json"}, guiFiles);
+        QVERIFY(code.has_value());
+        QCOMPARE(*code, 0);
+        QVERIFY(readFile(cliPdf).startsWith("%PDF-"));
+    }
+
     void markupAnnotationsRenderUndoAndClear() {
         QTemporaryDir dir;
         const QString imgPath = makeImage(dir.path(), "canvas.png", 400, 300, Qt::white);

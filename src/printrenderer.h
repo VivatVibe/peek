@@ -22,6 +22,8 @@ struct PaperSpec {
 
 struct PrintSettings {
     QString paperSize = "a4";
+    double customPaperWidthMm = 0.0;
+    double customPaperHeightMm = 0.0;
     QString orientation = "auto";    // auto | portrait | landscape
     QString scaleMode = "fit";       // fit | fill | scale
     int scalePercent = 100;          // 10..200 (used when scaleMode == "scale")
@@ -46,6 +48,8 @@ struct PrintSettings {
 namespace PrintRenderer {
 
 PaperSpec paperSpec(const QString &paperId);
+PaperSpec resolvePaperSpec(const PrintSettings &settings);
+bool parseCustomPaperDimensions(const QString &specText, double &widthMm, double &heightMm);
 QList<PaperSpec> allPapers();
 int normalizePerPage(int perPage);
 double marginMm(const QString &marginMode);

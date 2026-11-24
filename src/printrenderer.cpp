@@ -8,6 +8,7 @@
 #include <QPainter>
 #include <QPdfWriter>
 #include <QPen>
+#include <QRegularExpression>
 #include <QTransform>
 #include <QUuid>
 #include <algorithm>
@@ -34,6 +35,47 @@ PaperSpec paperSpec(const QString &paperId) {
             return spec;
     }
     return allPapers().first();
+}
+
+PaperSpec resolvePaperSpec(const PrintSettings &settings) {
+    if (settings.paperSize.startsWith("custom") &&
+        settings.customPaperWidthMm >= 10.0 &&
+        settings.customPaperHeightMm >= 10.0) {
+        const double w = std::clamp(settings.customPaperWidthMm, 10.0, 2000.0);
+        const double h = std::clamp(settings.customPaperHeightMm, 10.0, 2000.0);
+        PaperSpec custom;
+        custom.id = settings.paperSize;
+        custom.cupsMedia = QString("Custom.%1x%2mm").arg(w, 0, 'f', 1).arg(h, 0, 'f', 1);
+        custom.qtPageSize = QPageSize::Custom;
+        custom.widthMm = w;
+        custom.heightMm = h;
+        return custom;
+    }
+    return paperSpec(settings.paperSize);
+}
+
+bool parseCustomPaperDimensions(const QString &specText, double &widthMm, double &heightMm) {
+    static const QRegularExpression re(
+        R"re(^\s*([0-9]+(?:\.[0-9]+)?)\s*[xX×]\s*([0-9]+(?:\.[0-9]+)?)\s*(mm|cm|in)?\s*$)re");
+    const auto match = re.match(specText);
+    if (!match.hasMatch())
+        return false;
+
+    const double rawW = match.captured(1).toDouble();
+    const double rawH = match.captured(2).toDouble();
+    const QString unit = match.captured(3).toLower();
+    double scale = 1.0;
+    if (unit == "cm") scale = 10.0;
+    else if (unit == "in") scale = 25.4;
+
+    const double wMm = rawW * scale;
+    const double hMm = rawH * scale;
+    if (wMm < 10.0 || hMm < 10.0 || wMm > 2000.0 || hMm > 2000.0)
+        return false;
+
+    widthMm = wMm;
+    heightMm = hMm;
+    return true;
 }
 
 int normalizePerPage(int perPage) {
@@ -80,7 +122,7 @@ bool resolveLandscape(const PrintSettings &settings, const QSize &imageSize) {
 }
 
 QSizeF effectivePageSizeMm(const PrintSettings &settings, const QSize &imageSize) {
-    const PaperSpec spec = paperSpec(settings.paperSize);
+    const PaperSpec spec = resolvePaperSpec(settings);
     if (resolveLandscape(settings, imageSize))
         return QSizeF(spec.heightMm, spec.widthMm);
     return QSizeF(spec.widthMm, spec.heightMm);
@@ -315,7 +357,7 @@ bool exportPdf(const QString &outputPath,
         writer.setTitle(targetInfo.completeBaseName());
         writer.setResolution(300);
 
-        const PaperSpec spec = paperSpec(settings.paperSize);
+        const PaperSpec spec = resolvePaperSpec(settings);
         const QPageSize pageSize = spec.qtPageSize == QPageSize::Custom
                                        ? QPageSize(QSizeF(spec.widthMm, spec.heightMm), QPageSize::Millimeter, spec.id)
                                        : QPageSize(spec.qtPageSize);

@@ -121,5 +121,8 @@
   "Arrow": "سهم",
   "Line": "خط",
   "Pixelate": "تمويه",
-  "Redact (Blackout)": "حجب"
+  "Redact (Blackout)": "حجب",
+  "Custom…": "مخصص…",
+  "Manage Custom Sizes…": "إدارة الأحجام المخصصة…",
+  "Save Size": "حفظ الحجم"
 }

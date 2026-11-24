@@ -226,5 +226,15 @@
   "Markup Toolbar (M)": "แถบเครื่องมือวาด/ทำเครื่องหมาย (M)",
   "Inspector (I)": "ดูข้อมูลไฟล์และ EXIF (I)",
   "Toggle Markup Toolbar": "เปิด/ปิดแถบเครื่องมือทำเครื่องหมาย",
-  "Toggle Inspector (EXIF)": "เปิด/ปิดข้อมูลไฟล์และ EXIF"
+  "Toggle Inspector (EXIF)": "เปิด/ปิดข้อมูลไฟล์และ EXIF",
+  "Custom…": "กำหนดเอง…",
+  "Manage Custom Sizes…": "จัดการขนาดกระดาษเอง…",
+  "Paper name (e.g. Sticker 10×15)": "ชื่อกระดาษ (เช่น สติกเกอร์ 10×15)",
+  "Save Size": "บันทึกขนาด",
+  "%1 (%2 × %3 mm)": "%1 (%2 × %3 มม.)",
+  "Enter a name for the custom paper size.": "กรุณาใส่ชื่อขนาดกระดาษ",
+  "Paper dimensions must be between 10 mm and 2000 mm.": "ขนาดกระดาษต้องอยู่ระหว่าง 10 มม. ถึง 2000 มม.",
+  "Could not save custom paper size.": "ไม่สามารถบันทึกขนาดกระดาษได้",
+  "Saved paper size \"%1\"": "บันทึกขนาดกระดาษ \"%1\" แล้ว",
+  "Deleted paper size \"%1\"": "ลบขนาดกระดาษ \"%1\" แล้ว"
 }

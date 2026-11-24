@@ -15,6 +15,45 @@ Item {
 
     property bool moreOptionsExpanded: false
     property bool savingPreset: false
+    property bool editingCustomPaper: false
+    property string customPaperUnit: "mm" // mm | cm | in
+
+    function openCustomPaperEditor() {
+        editingCustomPaper = true
+        customPaperUnit = "mm"
+        customPaperNameInput.text = backend.activePaperCustom ? backend.activePaperName : ""
+        customPaperWInput.text = String(Math.round(backend.customPaperWidthMm * 10) / 10)
+        customPaperHInput.text = String(Math.round(backend.customPaperHeightMm * 10) / 10)
+        customPaperNameInput.forceActiveFocus()
+    }
+
+    function commitCustomPaper() {
+        const w = parseFloat(customPaperWInput.text.replace(",", "."))
+        const h = parseFloat(customPaperHInput.text.replace(",", "."))
+        if (isNaN(w) || isNaN(h))
+            return
+        if (backend.saveCustomPaper(customPaperNameInput.text, w, h, customPaperUnit))
+            editingCustomPaper = false
+    }
+
+    function paperItemLabel(item) {
+        void translator.language
+        if (item.custom) {
+            return qsTr("%1 (%2 × %3 mm)")
+                       .arg(item.name)
+                       .arg(formatMm(item.widthMm))
+                       .arg(formatMm(item.heightMm))
+        }
+        return paperLabel(item.id)
+    }
+
+    function paperIndex(list, activeId) {
+        for (let i = 0; i < list.length; ++i) {
+            if (list[i].id === activeId)
+                return i
+        }
+        return 0
+    }
 
     function presetLabel(item) {
         void translator.language
@@ -709,16 +748,51 @@ Item {
                             }
                         }
 
-                        // Paper size.
+                        // Paper size (built-ins + saved custom sizes + Manage Custom Sizes…).
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 5
 
-                            Text {
-                                text: qsTr("Paper Size")
-                                color: "#b4b4c0"
-                                font.pixelSize: 12
-                                font.weight: Font.Medium
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                Text {
+                                    text: qsTr("Paper Size")
+                                    color: "#b4b4c0"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                Text {
+                                    visible: backend.activePaperCustom && !sheet.editingCustomPaper
+                                    text: qsTr("Delete")
+                                    color: "#ff8c98"
+                                    font.pixelSize: 12
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.deleteActiveCustomPaper()
+                                    }
+                                }
+
+                                Text {
+                                    text: sheet.editingCustomPaper ? qsTr("Cancel") : qsTr("Custom…")
+                                    color: theme.accent
+                                    font.pixelSize: 12
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (sheet.editingCustomPaper)
+                                                sheet.editingCustomPaper = false
+                                            else
+                                                sheet.openCustomPaperEditor()
+                                        }
+                                    }
+                                }
                             }
 
                             ComboBox {
@@ -728,13 +802,194 @@ Item {
                                 Material.roundedScale: Math.min(4, theme.radius)
                                 model: {
                                     void translator.language
-                                    return sheet.paperIds.map(function(id) { return sheet.paperLabel(id) })
+                                    const labels = backend.paperOptions.map(function(item) { return sheet.paperItemLabel(item) })
+                                    labels.push(qsTr("Manage Custom Sizes…"))
+                                    return labels
                                 }
-                                currentIndex: Math.max(0, sheet.paperIds.indexOf(backend.paperSize))
-                                onModelChanged: currentIndex = Math.max(0, sheet.paperIds.indexOf(backend.paperSize))
+                                currentIndex: sheet.paperIndex(backend.paperOptions, backend.paperSize)
+                                onModelChanged: currentIndex = sheet.paperIndex(backend.paperOptions, backend.paperSize)
                                 onActivated: function(idx) {
-                                    if (idx >= 0 && idx < sheet.paperIds.length)
-                                        backend.paperSize = sheet.paperIds[idx]
+                                    if (idx === backend.paperOptions.length) {
+                                        currentIndex = sheet.paperIndex(backend.paperOptions, backend.paperSize)
+                                        sheet.openCustomPaperEditor()
+                                    } else if (idx >= 0 && idx < backend.paperOptions.length) {
+                                        sheet.editingCustomPaper = false
+                                        backend.paperSize = backend.paperOptions[idx].id
+                                    }
+                                }
+                            }
+
+                            // Inline macOS-style Custom Paper Size creator/editor.
+                            Rectangle {
+                                visible: sheet.editingCustomPaper
+                                Layout.fillWidth: true
+                                implicitHeight: customPaperCol.implicitHeight + 18
+                                radius: Math.min(4, theme.radius)
+                                color: "#131319"
+                                border.color: "#32323d"
+                                border.width: 1
+
+                                ColumnLayout {
+                                    id: customPaperCol
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 9
+                                    spacing: 8
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        height: 30
+                                        radius: Math.min(4, theme.radius)
+                                        color: "#0e0e13"
+                                        border.color: customPaperNameInput.activeFocus ? theme.accent : "#2c2c36"
+                                        border.width: 1
+
+                                        TextInput {
+                                            id: customPaperNameInput
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 8
+                                            anchors.rightMargin: 8
+                                            verticalAlignment: TextInput.AlignVCenter
+                                            color: "#f4f4f6"
+                                            font.pixelSize: 12
+                                            clip: true
+                                            onAccepted: sheet.commitCustomPaper()
+
+                                            Text {
+                                                anchors.fill: parent
+                                                verticalAlignment: Text.AlignVCenter
+                                                visible: !customPaperNameInput.text
+                                                text: qsTr("Paper name (e.g. Sticker 10×15)")
+                                                color: "#6e6e7c"
+                                                font.pixelSize: 12
+                                                elide: Text.ElideRight
+                                            }
+                                        }
+                                    }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 6
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            height: 30
+                                            radius: Math.min(4, theme.radius)
+                                            color: "#0e0e13"
+                                            border.color: customPaperWInput.activeFocus ? theme.accent : "#2c2c36"
+                                            border.width: 1
+
+                                            TextInput {
+                                                id: customPaperWInput
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 8
+                                                anchors.rightMargin: 8
+                                                verticalAlignment: TextInput.AlignVCenter
+                                                color: "#f4f4f6"
+                                                font.pixelSize: 12
+                                                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                                onAccepted: sheet.commitCustomPaper()
+
+                                                Text {
+                                                    anchors.fill: parent
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    visible: !customPaperWInput.text
+                                                    text: qsTr("Width")
+                                                    color: "#6e6e7c"
+                                                    font.pixelSize: 12
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "×"
+                                            color: "#8e8e9c"
+                                            font.pixelSize: 13
+                                        }
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            height: 30
+                                            radius: Math.min(4, theme.radius)
+                                            color: "#0e0e13"
+                                            border.color: customPaperHInput.activeFocus ? theme.accent : "#2c2c36"
+                                            border.width: 1
+
+                                            TextInput {
+                                                id: customPaperHInput
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 8
+                                                anchors.rightMargin: 8
+                                                verticalAlignment: TextInput.AlignVCenter
+                                                color: "#f4f4f6"
+                                                font.pixelSize: 12
+                                                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                                onAccepted: sheet.commitCustomPaper()
+
+                                                Text {
+                                                    anchors.fill: parent
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    visible: !customPaperHInput.text
+                                                    text: qsTr("Height")
+                                                    color: "#6e6e7c"
+                                                    font.pixelSize: 12
+                                                }
+                                            }
+                                        }
+
+                                        SegmentBar {
+                                            Layout.preferredWidth: 102
+                                            implicitHeight: 30
+                                            currentValue: sheet.customPaperUnit
+                                            options: [
+                                                { value: "mm", label: "mm" },
+                                                { value: "cm", label: "cm" },
+                                                { value: "in", label: "in" }
+                                            ]
+                                            onSelected: function(u) {
+                                                const oldScale = sheet.customPaperUnit === "cm" ? 10.0 : (sheet.customPaperUnit === "in" ? 25.4 : 1.0)
+                                                const newScale = u === "cm" ? 10.0 : (u === "in" ? 25.4 : 1.0)
+                                                const wVal = parseFloat(customPaperWInput.text.replace(",", "."))
+                                                const hVal = parseFloat(customPaperHInput.text.replace(",", "."))
+                                                sheet.customPaperUnit = u
+                                                if (!isNaN(wVal))
+                                                    customPaperWInput.text = String(Math.round((wVal * oldScale / newScale) * 10) / 10)
+                                                if (!isNaN(hVal))
+                                                    customPaperHInput.text = String(Math.round((hVal * oldScale / newScale) * 10) / 10)
+                                            }
+                                        }
+                                    }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Item { Layout.fillWidth: true }
+
+                                        Button {
+                                            id: saveCustomPaperBtn
+                                            Material.roundedScale: Math.min(4, theme.radius)
+                                            implicitHeight: 30
+                                            leftPadding: 14
+                                            rightPadding: 14
+                                            enabled: customPaperNameInput.text.trim().length > 0 &&
+                                                     customPaperWInput.text.trim().length > 0 &&
+                                                     customPaperHInput.text.trim().length > 0
+                                            text: qsTr("Save Size")
+                                            contentItem: Text {
+                                                text: saveCustomPaperBtn.text
+                                                color: saveCustomPaperBtn.enabled ? theme.accentForeground : "#6e6e7a"
+                                                font.pixelSize: 12
+                                                font.weight: Font.DemiBold
+                                                horizontalAlignment: Text.AlignHCenter
+                                                verticalAlignment: Text.AlignVCenter
+                                            }
+                                            background: Rectangle {
+                                                radius: Math.min(4, theme.radius)
+                                                color: saveCustomPaperBtn.enabled ? theme.accent : "#26262f"
+                                            }
+                                            onClicked: sheet.commitCustomPaper()
+                                        }
+                                    }
                                 }
                             }
                         }

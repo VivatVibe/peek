@@ -61,7 +61,7 @@ void printUsage() {
         << "\n"
         << "Print layout options:\n"
         << "  --preset <name-or-id>                Load a saved or built-in print preset\n"
-        << "  --paper a4|letter|4x6|5x7|a5|a3|legal\n"
+        << "  --paper a4|letter|4x6|5x7|a5|a3|legal|<W>x<H>mm|<custom-name>\n"
         << "  --orientation auto|portrait|landscape\n"
         << "  --fit fit|fill|scale\n"
         << "  --scale <10-200>\n"
@@ -223,7 +223,22 @@ bool parseJobOptions(const QStringList &args, CliJobOptions &opts, QString &erro
         } else if (arg == "--paper") {
             QString v;
             if (!requireValue(v)) return false;
-            opts.print.paperSize = PrintRenderer::paperSpec(v).id;
+            double wMm = 0.0, hMm = 0.0;
+            CustomPaperSize savedCustom;
+            PresetStore store;
+            if (PrintRenderer::parseCustomPaperDimensions(v, wMm, hMm)) {
+                opts.print.paperSize = "custom:cli";
+                opts.print.customPaperWidthMm = wMm;
+                opts.print.customPaperHeightMm = hMm;
+            } else if (store.findCustomPaperByNameOrId(v, savedCustom)) {
+                opts.print.paperSize = savedCustom.id;
+                opts.print.customPaperWidthMm = savedCustom.widthMm;
+                opts.print.customPaperHeightMm = savedCustom.heightMm;
+            } else {
+                opts.print.paperSize = PrintRenderer::paperSpec(v).id;
+                opts.print.customPaperWidthMm = 0.0;
+                opts.print.customPaperHeightMm = 0.0;
+            }
         } else if (arg == "--orientation") {
             QString v;
             if (!requireValue(v)) return false;
@@ -352,7 +367,7 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
     }
     if (cmd == "--version" || cmd == "-v") {
         QTextStream out(stdout);
-        out << "peek 0.5.0\n";
+        out << "peek 0.5.1\n";
         return 0;
     }
     if (cmd == "inspect") {

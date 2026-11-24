@@ -83,5 +83,8 @@
   "Arrow": "Flèche",
   "Line": "Ligne",
   "Pixelate": "Pixelliser",
-  "Redact (Blackout)": "Masquer"
+  "Redact (Blackout)": "Masquer",
+  "Custom…": "Personnalisé…",
+  "Manage Custom Sizes…": "Gérer les tailles personnalisées…",
+  "Save Size": "Enregistrer le format"
 }

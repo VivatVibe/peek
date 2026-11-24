@@ -30,7 +30,7 @@ description: >
 
 ## Print layout options
 
-- `--paper a4|letter|4x6|5x7|a5|a3|legal` (default: `a4`)
+- `--paper a4|letter|4x6|5x7|a5|a3|legal|<W>x<H>mm|<custom-name>` (default: `a4`)
 - `--orientation auto|portrait|landscape` (default: `auto`)
 - `--fit fit|fill|scale` (default: `fit`)
 - `--scale <10-200>`

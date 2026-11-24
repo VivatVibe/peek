@@ -100,12 +100,18 @@ class Backend : public QObject {
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY messageChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY messageChanged)
 
-    // macOS-style Print Presets & Last Used memory.
+    // macOS-style Print Presets, Custom Paper Sizes & Last Used memory.
     Q_PROPERTY(QVariantList presets READ presets NOTIFY presetsChanged)
     Q_PROPERTY(QString activePresetId READ activePresetId NOTIFY presetsChanged)
     Q_PROPERTY(QString activePresetName READ activePresetName NOTIFY presetsChanged)
     Q_PROPERTY(bool activePresetRemovable READ activePresetRemovable NOTIFY presetsChanged)
     Q_PROPERTY(bool activePresetModified READ activePresetModified NOTIFY presetsChanged)
+
+    Q_PROPERTY(QVariantList paperOptions READ paperOptions NOTIFY papersChanged)
+    Q_PROPERTY(bool activePaperCustom READ activePaperCustom NOTIFY printSettingsChanged)
+    Q_PROPERTY(QString activePaperName READ activePaperName NOTIFY printSettingsChanged)
+    Q_PROPERTY(double customPaperWidthMm READ customPaperWidthMm NOTIFY printSettingsChanged)
+    Q_PROPERTY(double customPaperHeightMm READ customPaperHeightMm NOTIFY printSettingsChanged)
 
 public:
     explicit Backend(FilePicker *filePicker = nullptr,
@@ -222,6 +228,14 @@ public:
     Q_INVOKABLE bool saveCurrentPreset(const QString &name);
     Q_INVOKABLE bool deleteActivePreset();
 
+    QVariantList paperOptions() const;
+    bool activePaperCustom() const;
+    QString activePaperName() const;
+    double customPaperWidthMm() const;
+    double customPaperHeightMm() const;
+    Q_INVOKABLE bool saveCustomPaper(const QString &name, double width, double height, const QString &unit);
+    Q_INVOKABLE bool deleteActiveCustomPaper();
+
     Q_INVOKABLE bool openFiles(const QStringList &paths);
     Q_INVOKABLE bool openUrls(const QList<QUrl> &urls);
     Q_INVOKABLE void openFileDialog();
@@ -292,6 +306,7 @@ signals:
     void printerOptionsChanged();
     void printSettingsChanged();
     void presetsChanged();
+    void papersChanged();
     void printStateChanged();
     void messageChanged();
 
