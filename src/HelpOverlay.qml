@@ -16,11 +16,13 @@ Item {
         { key: "Enter", label: qsTr("Print (inside Print Sheet)") },
         { key: "Ctrl+S", label: qsTr("Save as PDF") },
         { key: "E / Ctrl+Shift+S", label: qsTr("Export / Convert Format") },
-        { key: "O / Ctrl+O", label: qsTr("Open Image") },
+        { key: "O / Ctrl+O", label: qsTr("Open Image or PDF") },
         { key: "Tab", label: qsTr("Toggle Thumbnail Sidebar") },
+        { key: "Ctrl+↑ / Ctrl+↓", label: qsTr("Move Page Up / Down") },
+        { key: "Ctrl+Shift+M / Del", label: qsTr("Merge PDF / Remove Page") },
         { key: "S / Shift+Drag", label: qsTr("Select Region to Crop or Print") },
         { key: "M", label: qsTr("Toggle Markup Toolbar") },
-        { key: "I", label: qsTr("Toggle Inspector (EXIF)") },
+        { key: "I", label: qsTr("Toggle Inspector (EXIF / PDF)") },
         { key: "Ctrl+K", label: qsTr("Crop to Selection") },
         { key: "Ctrl+C", label: qsTr("Copy Image or Selection") },
         { key: "Ctrl+Shift+R", label: qsTr("Adjust Size (Resize)") },
@@ -51,13 +53,14 @@ Item {
         border.color: "#2e2e36"
         border.width: 1
 
-        MouseArea { anchors.fill: parent }
+        MouseArea {
+            anchors.fill: parent
+            onWheel: function(wheel) { wheel.accepted = true }
+        }
 
         ColumnLayout {
             id: contentCol
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
+            anchors.fill: parent
             anchors.margins: 20
             spacing: 12
 
@@ -88,38 +91,54 @@ Item {
                 color: "#2a2a32"
             }
 
-            Repeater {
-                model: overlay.shortcuts
+            Flickable {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: width
+                contentHeight: shortcutCol.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-                RowLayout {
-                    required property var modelData
-                    Layout.fillWidth: true
-                    spacing: 12
+                ColumnLayout {
+                    id: shortcutCol
+                    width: parent.width
+                    spacing: 10
 
-                    Text {
-                        Layout.fillWidth: true
-                        text: modelData.label
-                        color: "#d4d4dc"
-                        font.pixelSize: 13
-                        elide: Text.ElideRight
-                    }
+                    Repeater {
+                        model: overlay.shortcuts
 
-                    Rectangle {
-                        implicitWidth: keyText.implicitWidth + 16
-                        implicitHeight: 24
-                        radius: Math.min(4, theme.radius)
-                        color: "#111115"
-                        border.color: "#32323c"
-                        border.width: 1
+                        RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: 12
 
-                        Text {
-                            id: keyText
-                            anchors.centerIn: parent
-                            text: modelData.key
-                            color: theme.accent
-                            font.pixelSize: 11
-                            font.family: "monospace"
-                            font.weight: Font.Medium
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.label
+                                color: "#d4d4dc"
+                                font.pixelSize: 13
+                                elide: Text.ElideRight
+                            }
+
+                            Rectangle {
+                                implicitWidth: keyText.implicitWidth + 16
+                                implicitHeight: 24
+                                radius: Math.min(4, theme.radius)
+                                color: "#111115"
+                                border.color: "#32323c"
+                                border.width: 1
+
+                                Text {
+                                    id: keyText
+                                    anchors.centerIn: parent
+                                    text: modelData.key
+                                    color: theme.accent
+                                    font.pixelSize: 11
+                                    font.family: "monospace"
+                                    font.weight: Font.Medium
+                                }
+                            }
                         }
                     }
                 }

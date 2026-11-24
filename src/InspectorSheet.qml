@@ -125,14 +125,26 @@ Rectangle {
             InfoRow { label: qsTr("Format"); value: backend.metadata.format || "—" }
             InfoRow { label: qsTr("File Size"); value: panel.formatBytes(backend.metadata.fileBytes) }
             InfoRow {
+                visible: !!backend.metadata.isPdf
+                label: qsTr("Page")
+                value: {
+                    void translator.language
+                    const cur = Number(backend.imageIndex + 1).toLocaleString(Qt.locale(), 'f', 0)
+                    const tot = Number(backend.imageCount).toLocaleString(Qt.locale(), 'f', 0)
+                    return qsTr("%1 / %2").arg(cur).arg(tot)
+                }
+            }
+            InfoRow {
+                visible: !backend.metadata.isPdf
                 label: qsTr("Dimensions")
                 value: panel.formatDim(backend.metadata.width, backend.metadata.height, backend.metadata.megapixels)
             }
             InfoRow {
-                label: qsTr("Print (300 DPI)")
+                label: backend.metadata.isPdf ? qsTr("Page Size") : qsTr("Print (300 DPI)")
                 value: panel.formatPrintSize(backend.metadata.printWidthMm, backend.metadata.printHeightMm)
             }
             InfoRow {
+                visible: !backend.metadata.isPdf
                 label: qsTr("Color Depth")
                 value: {
                     void translator.language
@@ -144,34 +156,71 @@ Rectangle {
 
             Rectangle { Layout.fillWidth: true; height: 1; color: "#2a2a32"; Layout.topMargin: 2 }
 
-            Text {
-                text: qsTr("Camera (EXIF)")
-                color: theme.accent
-                font.pixelSize: 11
-                font.weight: Font.DemiBold
-            }
-
-            Text {
-                visible: !backend.metadata.hasExif
-                text: qsTr("No EXIF camera metadata in this file.")
-                color: "#7a7a88"
-                font.pixelSize: 12
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
-
+            // PDF document metadata section.
             ColumnLayout {
-                visible: !!backend.metadata.hasExif
+                visible: !!backend.metadata.isPdf
                 Layout.fillWidth: true
                 spacing: 8
 
-                InfoRow { visible: !!backend.metadata.camera; label: qsTr("Camera"); value: backend.metadata.camera || "" }
-                InfoRow { visible: !!backend.metadata.lens; label: qsTr("Lens"); value: backend.metadata.lens || "" }
-                InfoRow { visible: !!backend.metadata.dateTaken; label: qsTr("Date Taken"); value: backend.metadata.dateTaken || "" }
-                InfoRow { visible: !!backend.metadata.exposureTime; label: qsTr("Exposure"); value: backend.metadata.exposureTime || "" }
-                InfoRow { visible: !!backend.metadata.aperture; label: qsTr("Aperture"); value: backend.metadata.aperture || "" }
-                InfoRow { visible: !!backend.metadata.iso; label: qsTr("ISO"); value: backend.metadata.iso || "" }
-                InfoRow { visible: !!backend.metadata.focalLength; label: qsTr("Focal Length"); value: backend.metadata.focalLength || "" }
+                Text {
+                    text: qsTr("PDF Document")
+                    color: theme.accent
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                }
+
+                readonly property bool hasPdfInfo: !!(backend.metadata.pdfTitle || backend.metadata.pdfAuthor || backend.metadata.pdfCreator || backend.metadata.pdfProducer)
+
+                Text {
+                    visible: !parent.hasPdfInfo
+                    text: qsTr("No PDF document metadata.")
+                    color: "#7a7a88"
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                InfoRow { visible: !!backend.metadata.pdfTitle; label: qsTr("Title"); value: backend.metadata.pdfTitle || "" }
+                InfoRow { visible: !!backend.metadata.pdfAuthor; label: qsTr("Author"); value: backend.metadata.pdfAuthor || "" }
+                InfoRow { visible: !!backend.metadata.pdfCreator; label: qsTr("Creator"); value: backend.metadata.pdfCreator || "" }
+                InfoRow { visible: !!backend.metadata.pdfProducer; label: qsTr("Producer"); value: backend.metadata.pdfProducer || "" }
+            }
+
+            // Camera EXIF section for images.
+            ColumnLayout {
+                visible: !backend.metadata.isPdf
+                Layout.fillWidth: true
+                spacing: 8
+
+                Text {
+                    text: qsTr("Camera (EXIF)")
+                    color: theme.accent
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                }
+
+                Text {
+                    visible: !backend.metadata.hasExif
+                    text: qsTr("No EXIF camera metadata in this file.")
+                    color: "#7a7a88"
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                ColumnLayout {
+                    visible: !!backend.metadata.hasExif
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    InfoRow { visible: !!backend.metadata.camera; label: qsTr("Camera"); value: backend.metadata.camera || "" }
+                    InfoRow { visible: !!backend.metadata.lens; label: qsTr("Lens"); value: backend.metadata.lens || "" }
+                    InfoRow { visible: !!backend.metadata.dateTaken; label: qsTr("Date Taken"); value: backend.metadata.dateTaken || "" }
+                    InfoRow { visible: !!backend.metadata.exposureTime; label: qsTr("Exposure"); value: backend.metadata.exposureTime || "" }
+                    InfoRow { visible: !!backend.metadata.aperture; label: qsTr("Aperture"); value: backend.metadata.aperture || "" }
+                    InfoRow { visible: !!backend.metadata.iso; label: qsTr("ISO"); value: backend.metadata.iso || "" }
+                    InfoRow { visible: !!backend.metadata.focalLength; label: qsTr("Focal Length"); value: backend.metadata.focalLength || "" }
+                }
             }
         }
     }

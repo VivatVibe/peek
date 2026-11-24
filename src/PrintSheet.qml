@@ -16,6 +16,7 @@ Item {
     property bool moreOptionsExpanded: false
     property bool savingPreset: false
     property bool editingCustomPaper: false
+    readonly property bool editingPageRange: pageRangeInput.activeFocus
     property string customPaperUnit: "mm" // mm | cm | in
 
     function openCustomPaperEditor() {
@@ -169,9 +170,9 @@ Item {
                         Layout.fillWidth: true
                         text: {
                             void translator.language
-                            if (backend.multiMode === "selected" && backend.imageCount > 1) {
-                                const count = backend.selectedCount > 0 ? backend.selectedCount : backend.imageCount
-                                return qsTr("%n images", "", count)
+                            if (backend.pageRangeMode !== "current" && backend.imageCount > 1) {
+                                const count = backend.activePageCount
+                                return backend.isPdfMode ? qsTr("%n pages", "", count) : qsTr("%n images", "", count)
                             }
                             return backend.fileName
                         }
@@ -683,6 +684,88 @@ Item {
                             }
                         }
 
+                        // Page range selector (shown when document or folder has multiple pages/images).
+                        ColumnLayout {
+                            visible: backend.imageCount > 1
+                            Layout.fillWidth: true
+                            spacing: 5
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: backend.isPdfMode ? qsTr("Pages") : qsTr("Images")
+                                    color: "#b4b4c0"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                }
+
+                                Text {
+                                    visible: backend.pageRangeMode === "range" && !backend.pageRangeValid
+                                    text: qsTr("Invalid range")
+                                    color: "#ff8c98"
+                                    font.pixelSize: 11
+                                }
+                            }
+
+                            SegmentBar {
+                                Layout.fillWidth: true
+                                currentValue: backend.pageRangeMode
+                                options: {
+                                    void translator.language
+                                    const allCount = Number(backend.imageCount).toLocaleString(Qt.locale(), 'f', 0)
+                                    const opts = [
+                                        { value: "all", label: qsTr("All (%1)").arg(allCount) },
+                                        { value: "current", label: backend.perPage > 1 ? qsTr("Repeat") : qsTr("Current") }
+                                    ]
+                                    if (backend.selectedCount > 0) {
+                                        const selCount = Number(backend.selectedCount).toLocaleString(Qt.locale(), 'f', 0)
+                                        opts.push({ value: "selected", label: qsTr("Selected (%1)").arg(selCount) })
+                                    }
+                                    opts.push({ value: "range", label: qsTr("Range") })
+                                    return opts
+                                }
+                                onSelected: function(val) {
+                                    backend.pageRangeMode = val
+                                    if (val === "range")
+                                        pageRangeInput.forceActiveFocus()
+                                }
+                            }
+
+                            Rectangle {
+                                visible: backend.pageRangeMode === "range"
+                                Layout.fillWidth: true
+                                height: 32
+                                radius: Math.min(4, theme.radius)
+                                color: "#111115"
+                                border.color: !backend.pageRangeValid ? "#e05561" : (pageRangeInput.activeFocus ? theme.accent : "#32323d")
+                                border.width: 1
+
+                                TextInput {
+                                    id: pageRangeInput
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    color: "#f4f4f6"
+                                    font.pixelSize: 12
+                                    clip: true
+                                    text: backend.pageRangeText
+                                    onTextEdited: backend.pageRangeText = text
+
+                                    Text {
+                                        anchors.fill: parent
+                                        verticalAlignment: Text.AlignVCenter
+                                        visible: !pageRangeInput.text
+                                        text: qsTr("e.g. 1-3, 5")
+                                        color: "#6e6e7c"
+                                        font.pixelSize: 12
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                        }
+
                         // Images per sheet (N-up).
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -692,7 +775,7 @@ Item {
                                 Layout.fillWidth: true
                                 Text {
                                     Layout.fillWidth: true
-                                    text: qsTr("Images per Sheet")
+                                    text: backend.isPdfMode ? qsTr("Pages per Sheet") : qsTr("Images per Sheet")
                                     color: "#b4b4c0"
                                     font.pixelSize: 12
                                     font.weight: Font.Medium
@@ -725,26 +808,6 @@ Item {
                                     { value: "16", label: "16" }
                                 ]
                                 onSelected: function(val) { backend.perPage = parseInt(val, 10) }
-                            }
-
-                            // Choose between repeating the current image or packing selected/folder images.
-                            SegmentBar {
-                                visible: backend.imageCount > 1 && (backend.perPage > 1 || backend.selectedCount > 1 || backend.multiMode === "selected")
-                                Layout.fillWidth: true
-                                currentValue: backend.multiMode
-                                options: {
-                                    void translator.language
-                                    const batchCount = backend.selectedCount > 0 ? backend.selectedCount : backend.imageCount
-                                    const countText = Number(batchCount).toLocaleString(Qt.locale(), 'f', 0)
-                                    const batchLabel = backend.selectedCount > 0
-                                                       ? qsTr("Selected (%1)").arg(countText)
-                                                       : qsTr("All Images (%1)").arg(countText)
-                                    return [
-                                        { value: "repeat", label: qsTr("Repeat Current") },
-                                        { value: "selected", label: batchLabel }
-                                    ]
-                                }
-                                onSelected: function(val) { backend.multiMode = val }
                             }
                         }
 
@@ -1325,7 +1388,7 @@ Item {
                         implicitHeight: 36
                         leftPadding: 18
                         rightPadding: 18
-                        enabled: !backend.printBusy && backend.printer.length > 0
+                        enabled: !backend.printBusy && backend.printer.length > 0 && backend.pageRangeValid
                         text: backend.printBusy ? qsTr("Printing…") : qsTr("Print")
                         contentItem: Text {
                             text: printNowBtn.text

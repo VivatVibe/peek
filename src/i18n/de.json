@@ -51,8 +51,14 @@
   "Print Selection": "Auswahl drucken",
   "All": "Alle",
   "Clear": "Leeren",
-  "%n images": { "one": "%n Bild", "other": "%n Bilder" },
-  "%n selected": { "one": "%n ausgewählt", "other": "%n ausgewählt" },
+  "%n images": {
+    "one": "%n Bild",
+    "other": "%n Bilder"
+  },
+  "%n selected": {
+    "one": "%n ausgewählt",
+    "other": "%n ausgewählt"
+  },
   "Adjust Size": "Größe anpassen",
   "Adjust Color": "Farbe anpassen",
   "Exposure": "Belichtung",
@@ -92,5 +98,50 @@
   "Redact (Blackout)": "Schwärzen",
   "Custom…": "Eigene…",
   "Manage Custom Sizes…": "Eigene Papierformate verwalten…",
-  "Save Size": "Format speichern"
+  "Save Size": "Format speichern",
+  "Drop an image or PDF to preview & print": "Bild oder PDF zur Vorschau und zum Drucken ablegen",
+  "Open Image or PDF": "Bild oder PDF öffnen",
+  "Images & PDFs": "Bilder & PDFs",
+  "Merge PDF or Images": "PDF oder Bilder zusammenführen",
+  "+ Merge": "+ Hinzufügen",
+  "%n pages": {
+    "one": "%n Seite",
+    "other": "%n Seiten"
+  },
+  "Added %n pages": {
+    "one": "%n Seite hinzugefügt",
+    "other": "%n Seiten hinzugefügt"
+  },
+  "Page %1": "Seite %1",
+  "Page": "Seite",
+  "Pages": "Seiten",
+  "Pages per Sheet": "Seiten pro Blatt",
+  "All (%1)": "Alle (%1)",
+  "Current": "Aktuelle",
+  "Repeat": "Wiederholen",
+  "Range": "Bereich",
+  "e.g. 1-3, 5": "z. B. 1-3, 5",
+  "Invalid range": "Ungültiger Bereich",
+  "Invalid page range. Use numbers like 1-3, 5.": "Ungültiger Seitenbereich. Verwenden Sie Zahlen wie 1-3, 5.",
+  "Page Size": "Seitengröße",
+  "%1 / %2": "%1 / %2",
+  "PDF Document": "PDF-Dokument",
+  "No PDF document metadata.": "Keine PDF-Dokumentmetadaten.",
+  "Title": "Titel",
+  "Author": "Autor",
+  "Creator": "Erstellt mit",
+  "Producer": "PDF-Erzeuger",
+  "Move Page Up / Down": "Seite nach oben / unten",
+  "Merge PDF / Remove Page": "PDF zusammenführen / Seite entfernen",
+  "Toggle Inspector (EXIF / PDF)": "Inspektor umschalten (EXIF / PDF)",
+  "Removed page (original file unchanged)": "Seite entfernt (Originaldatei unverändert)",
+  "No supported image or PDF files found.": "Keine unterstützten Bild- oder PDF-Dateien gefunden.",
+  "No supported image or PDF files to merge.": "Keine unterstützten Bild- oder PDF-Dateien zum Zusammenführen.",
+  "PDF file not found: %1": "PDF-Datei nicht gefunden: %1",
+  "Could not open PDF: %1": "PDF konnte nicht geöffnet werden: %1",
+  "PDF is password-protected: %1": "PDF ist passwortgeschützt: %1",
+  "PDF page %1 is out of range.": "PDF-Seite %1 liegt außerhalb des Bereichs.",
+  "Could not load PDF page %1.": "PDF-Seite %1 konnte nicht geladen werden.",
+  "Could not render PDF page %1.": "PDF-Seite %1 konnte nicht gerendert werden.",
+  "Could not render page %1 of %2": "Seite %1 von %2 konnte nicht gerendert werden"
 }

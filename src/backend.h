@@ -23,6 +23,14 @@ struct CupsOption {
     QString defaultValue;
 };
 
+struct PageEntry {
+    bool isPdfPage = false;
+    QString sourcePath;
+    int sourcePageIndex = 0; // 0-based page index in sourcePath PDF
+    EditState edit;
+    bool dirty = false;
+};
+
 class Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool hasImage READ hasImage NOTIFY imageChanged)
@@ -36,6 +44,8 @@ class Backend : public QObject {
     Q_PROPERTY(int fileListVersion READ fileListVersion NOTIFY filesChanged)
     Q_PROPERTY(int imageIndex READ imageIndex NOTIFY imageChanged)
     Q_PROPERTY(int imageCount READ imageCount NOTIFY filesChanged)
+    Q_PROPERTY(bool isPdfMode READ isPdfMode NOTIFY filesChanged)
+    Q_PROPERTY(bool hasDocumentChanges READ hasDocumentChanges NOTIFY filesChanged)
     Q_PROPERTY(QVariantList fileItems READ fileItems NOTIFY filesChanged)
     Q_PROPERTY(int selectedCount READ selectedCount NOTIFY filesChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY imageChanged)
@@ -89,6 +99,10 @@ class Backend : public QObject {
     Q_PROPERTY(bool grayscale READ grayscale WRITE setGrayscale NOTIFY printSettingsChanged)
     Q_PROPERTY(int perPage READ perPage WRITE setPerPage NOTIFY printSettingsChanged)
     Q_PROPERTY(QString multiMode READ multiMode WRITE setMultiMode NOTIFY printSettingsChanged)
+    Q_PROPERTY(QString pageRangeMode READ pageRangeMode WRITE setPageRangeMode NOTIFY printSettingsChanged)
+    Q_PROPERTY(QString pageRangeText READ pageRangeText WRITE setPageRangeText NOTIFY printSettingsChanged)
+    Q_PROPERTY(bool pageRangeValid READ pageRangeValid NOTIFY printSettingsChanged)
+    Q_PROPERTY(int activePageCount READ activePageCount NOTIFY printSettingsChanged)
     Q_PROPERTY(bool cutGuides READ cutGuides WRITE setCutGuides NOTIFY printSettingsChanged)
     Q_PROPERTY(int previewPageIndex READ previewPageIndex WRITE setPreviewPageIndex NOTIFY printSettingsChanged)
     Q_PROPERTY(int previewPageCount READ previewPageCount NOTIFY printSettingsChanged)
@@ -132,13 +146,15 @@ public:
     int imageVersion() const { return m_imageVersion; }
     int fileListVersion() const { return m_fileListVersion; }
     int imageIndex() const { return m_currentIndex; }
-    int imageCount() const { return m_files.size(); }
+    int imageCount() const { return m_entries.size(); }
+    bool isPdfMode() const { return m_isPdfMode; }
+    bool hasDocumentChanges() const;
     QVariantList fileItems() const;
     int selectedCount() const { return m_selectedIndices.size(); }
     bool canUndo() const { return !m_undoStack.isEmpty(); }
     bool canRedo() const { return !m_redoStack.isEmpty(); }
     bool isTransformed() const { return !m_edit.isIdentity(); }
-    bool hasUnsavedEdits() const { return !m_edit.isIdentity() && m_editVersion != m_exportedEditVersion; }
+    bool hasUnsavedEdits() const;
     int annotationCount() const { return m_edit.annotations.size(); }
     QVariantMap metadata() const { return m_metadata; }
     int rotation() const { return m_edit.rotation; }
@@ -166,7 +182,7 @@ public:
     QImage displayImage() const { return m_displayImage; }
     QImage thumbnailForIndex(int index) const;
     QImage printableImage() const;
-    QVector<QVector<QImage>> buildPrintPages() const;
+    QVector<QVector<QImage>> buildPrintPages(bool highRes = true) const;
     QVector<QImage> previewPageImages() const;
     PrintSettings printSettings() const { return m_printSettings; }
 
@@ -205,6 +221,12 @@ public:
     void setPerPage(int count);
     QString multiMode() const { return m_multiMode; }
     void setMultiMode(const QString &mode);
+    QString pageRangeMode() const { return m_pageRangeMode; }
+    void setPageRangeMode(const QString &mode);
+    QString pageRangeText() const { return m_pageRangeText; }
+    void setPageRangeText(const QString &text);
+    bool pageRangeValid() const;
+    int activePageCount() const;
     bool cutGuides() const { return m_printSettings.cutGuides; }
     void setCutGuides(bool enabled);
     int previewPageIndex() const { return m_previewPageIndex; }
@@ -247,6 +269,15 @@ public:
     Q_INVOKABLE void selectRangeTo(int index);
     Q_INVOKABLE void selectAllFiles();
     Q_INVOKABLE void clearFileSelection();
+
+    // PDF & multi-page document organization (non-destructive; never modifies originals).
+    Q_INVOKABLE bool movePage(int fromIndex, int toIndex);
+    Q_INVOKABLE bool moveCurrentPageUp();
+    Q_INVOKABLE bool moveCurrentPageDown();
+    Q_INVOKABLE bool deletePage(int index);
+    Q_INVOKABLE bool deleteCurrentPage();
+    Q_INVOKABLE bool appendFiles(const QStringList &paths);
+    Q_INVOKABLE void appendFilesDialog();
 
     Q_INVOKABLE void setSelectionRect(double x, double y, double w, double h);
     Q_INVOKABLE void clearSelection();
@@ -312,6 +343,8 @@ signals:
 
 private:
     bool loadIndex(int index);
+    void syncCurrentEntryEdits();
+    QImage renderEntryForPrint(int index, bool highRes) const;
     void applyEditState(const EditState &next, bool recordUndo);
     void rebuildPreColorImage();
     void rebuildDisplayImageFromPreColor();
@@ -335,7 +368,9 @@ private:
     bool m_activePresetModified = false;
     bool m_hasSavedExportFormat = false;
 
-    QStringList m_files;
+    QVector<PageEntry> m_entries;
+    bool m_isPdfMode = false;
+    bool m_documentDirty = false;
     QSet<int> m_selectedIndices;
     int m_currentIndex = -1;
     QImage m_sourceImage;
@@ -373,6 +408,8 @@ private:
 
     PrintSettings m_printSettings;
     QString m_multiMode = "repeat"; // repeat | selected
+    QString m_pageRangeMode = "current"; // all | current | selected | range
+    QString m_pageRangeText;
     int m_previewPageIndex = 0;
 
     QProcess m_lpstatProcess;

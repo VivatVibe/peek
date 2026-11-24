@@ -1,4 +1,5 @@
 #include "inspector.h"
+#include "pdfdocument.h"
 
 #include <QDateTime>
 #include <QFile>
@@ -192,28 +193,52 @@ void parseExifFromJpeg(const QByteArray &bytes, QVariantMap &out) {
 
 namespace Inspector {
 
-QVariantMap readMetadata(const QString &filePath, const QImage &displayImage) {
+QVariantMap readMetadata(const QString &filePath,
+                         const QImage &displayImage,
+                         int pdfPageIndex,
+                         int totalDocPages) {
     QVariantMap info;
     if (filePath.isEmpty() || displayImage.isNull())
         return info;
 
     const QFileInfo fi(filePath);
-    QImageReader reader(filePath);
-    const QString fmt = QString::fromLatin1(reader.format()).toUpper();
+    const bool isPdf = pdfPageIndex >= 0 || PdfDocument::isPdfFile(filePath);
 
     info.insert("fileName", fi.fileName());
     info.insert("folderPath", fi.absolutePath());
-    info.insert("format", fmt.isEmpty() ? fi.suffix().toUpper() : fmt);
     info.insert("fileBytes", fi.size());
     info.insert("modifiedIso", fi.lastModified().toString(Qt::ISODate));
     info.insert("modifiedMs", fi.lastModified().toMSecsSinceEpoch());
     info.insert("width", displayImage.width());
     info.insert("height", displayImage.height());
     info.insert("megapixels", (static_cast<double>(displayImage.width()) * displayImage.height()) / 1000000.0);
-    info.insert("printWidthMm", displayImage.width() * 25.4 / 300.0);
-    info.insert("printHeightMm", displayImage.height() * 25.4 / 300.0);
     info.insert("depth", displayImage.depth());
     info.insert("hasAlpha", displayImage.hasAlphaChannel());
+    info.insert("isPdf", isPdf);
+
+    if (isPdf) {
+        const PdfMetadata pdfMeta = PdfDocument::readDocumentInfo(filePath);
+        const int pageIdx = std::max(0, pdfPageIndex);
+        const QSizeF pageMm = PdfDocument::pageSizeMm(filePath, pageIdx);
+        info.insert("format", QStringLiteral("PDF"));
+        info.insert("pdfPageNumber", pageIdx + 1);
+        info.insert("pdfPageCount", totalDocPages > 0 ? totalDocPages : pdfMeta.pageCount);
+        info.insert("pdfSourcePageCount", pdfMeta.pageCount);
+        info.insert("printWidthMm", pageMm.isValid() && !pageMm.isEmpty() ? pageMm.width() : displayImage.width() * 25.4 / 150.0);
+        info.insert("printHeightMm", pageMm.isValid() && !pageMm.isEmpty() ? pageMm.height() : displayImage.height() * 25.4 / 150.0);
+        if (!pdfMeta.title.isEmpty()) info.insert("pdfTitle", pdfMeta.title);
+        if (!pdfMeta.author.isEmpty()) info.insert("pdfAuthor", pdfMeta.author);
+        if (!pdfMeta.creator.isEmpty()) info.insert("pdfCreator", pdfMeta.creator);
+        if (!pdfMeta.producer.isEmpty()) info.insert("pdfProducer", pdfMeta.producer);
+        info.insert("hasExif", false);
+        return info;
+    }
+
+    QImageReader reader(filePath);
+    const QString fmt = QString::fromLatin1(reader.format()).toUpper();
+    info.insert("format", fmt.isEmpty() ? fi.suffix().toUpper() : fmt);
+    info.insert("printWidthMm", displayImage.width() * 25.4 / 300.0);
+    info.insert("printHeightMm", displayImage.height() * 25.4 / 300.0);
 
     // Read up to first 128 KB of JPEG files for EXIF metadata.
     if (fmt == "JPEG" || fi.suffix().compare("jpg", Qt::CaseInsensitive) == 0 ||

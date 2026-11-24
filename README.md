@@ -2,9 +2,14 @@
 
 ![Peek print preview](docs/screenshot.png)
 
-Fast image preview, quick editing, and effortless printing for Omarchy — inspired by macOS Preview.
+Fast image & PDF preview, quick editing, and effortless printing for Omarchy — inspired by macOS Preview.
 
-- **One window, keyboard-first**: drop or open any image (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG), browse thumbnails in the sidebar (`Tab`), multi-select images for batch printing, zoom toward the pointer, and undo/redo without ever modifying originals.
+- **One window, keyboard-first**: drop or open any image (PNG, JPEG, WebP, GIF, BMP, TIFF, SVG) or **PDF document**, browse thumbnails in the sidebar (`Tab`), multi-select images or pages for batch printing, zoom toward the pointer, and undo/redo without ever modifying originals.
+- **PDF Companion (`poppler-qt6`)**:
+  - Open single or multi-page PDFs with automatic thumbnail sidebar, crisp 150 DPI viewing, and 300 DPI print/export output.
+  - **Organize & Merge**: reorder pages (`Ctrl+↑` / `Ctrl+↓`), remove pages (`Delete`), merge additional PDFs or images (`+ Merge` / `Ctrl+Shift+M`), annotate or rotate individual pages, and save the organized document via `Ctrl+S` — never modifying source files.
+  - **Page Ranges**: print or export `All`, `Current`, `Selected`, or custom ranges (`1-3, 5`) with live multi-page preview.
+  - **PDF Inspector (`I`)**: displays page count, physical page size (mm), and PDF document metadata (Title, Author, Creator, Producer).
 - **Quick Edit & Export (non-destructive)**:
   - **Crop & Copy (`S` / `Ctrl+K` / `Ctrl+C`)**: draw a selection with optional aspect-ratio presets (`Free`, `1:1`, `4:3`, `3:2`, `16:9`, `A4`), crop cleanly, or copy image/selection to the clipboard.
   - **Adjust Size (`Ctrl+Shift+R`)**: resize by pixels or percent with proportional lock and quick presets (`50%`, `75%`, `1920`, `1280`, `Original`).
@@ -29,11 +34,13 @@ Fast image preview, quick editing, and effortless printing for Omarchy — inspi
 | `PgUp` / `PgDn` | Previous / Next Page (inside Print Sheet) |
 | `Ctrl+S` | Save as PDF |
 | `E` / `Ctrl+Shift+S` | Export / Convert Format |
-| `O` / `Ctrl+O` | Open Image |
+| `O` / `Ctrl+O` | Open Image or PDF |
 | `Tab` | Toggle Thumbnail Sidebar |
+| `Ctrl+↑` / `Ctrl+↓` | Move Page Up / Down |
+| `Ctrl+Shift+M` / `Del` | Merge PDF or Images / Remove Page |
 | `S` / `Shift+Drag` | Select Region to Crop or Print |
 | `M` | Toggle Markup Toolbar |
-| `I` | Toggle Inspector (EXIF) |
+| `I` | Toggle Inspector (EXIF / PDF) |
 | `Ctrl+K` | Crop to Selection |
 | `Ctrl+C` | Copy Image or Selection |
 | `Ctrl+Shift+R` | Adjust Size (Resize) |
@@ -57,9 +64,11 @@ Peek can also be driven without a display:
 ```sh
 peek printers --json
 peek presets --json
+peek inspect document.pdf --json
 peek export photo.png -o edited.jpg --crop 100,100,800,600 --resize 640x480 --quality 85 --auto-levels --json
+peek export report.pdf appendix.pdf --pages 1-3,5 -o merged.pdf --json
 peek export photo.png -o sheet.pdf --preset "4-Up Sheet with Cut Guides" --json
-peek print photo.png --preset "Photo 4×6 Borderless" --copies 2 --json
+peek print report.pdf --pages 1-2 --preset "Black & White Draft" --copies 2 --json
 peek skill install
 ```
 
@@ -70,7 +79,7 @@ peek skill install
 Download the latest `.pkg.tar.zst` from [GitHub Releases](https://github.com/VivatVibe/peek/releases/latest) and install it with `pacman`:
 
 ```sh
-sudo pacman -U peek-0.5.1-1-x86_64.pkg.tar.zst
+sudo pacman -U peek-0.6.0-1-x86_64.pkg.tar.zst
 ```
 
 ### Build from Source

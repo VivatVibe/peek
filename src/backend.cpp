@@ -1,5 +1,6 @@
 #include "backend.h"
 #include "inspector.h"
+#include "pdfdocument.h"
 
 #include <QClipboard>
 #include <QCollator>
@@ -224,9 +225,9 @@ Backend::~Backend() {
 }
 
 QString Backend::filePath() const {
-    if (m_currentIndex < 0 || m_currentIndex >= m_files.size())
+    if (m_currentIndex < 0 || m_currentIndex >= m_entries.size())
         return {};
-    return m_files.at(m_currentIndex);
+    return m_entries.at(m_currentIndex).sourcePath;
 }
 
 QString Backend::fileName() const {
@@ -234,14 +235,32 @@ QString Backend::fileName() const {
     return path.isEmpty() ? QString() : QFileInfo(path).fileName();
 }
 
+bool Backend::hasDocumentChanges() const {
+    if (m_documentDirty)
+        return true;
+    for (int i = 0; i < m_entries.size(); ++i) {
+        if (i != m_currentIndex && m_entries.at(i).dirty)
+            return true;
+    }
+    return false;
+}
+
+bool Backend::hasUnsavedEdits() const {
+    return (!m_edit.isIdentity() && m_editVersion != m_exportedEditVersion) || hasDocumentChanges();
+}
+
 QVariantList Backend::fileItems() const {
     QVariantList items;
-    items.reserve(m_files.size());
-    for (int i = 0; i < m_files.size(); ++i) {
+    items.reserve(m_entries.size());
+    for (int i = 0; i < m_entries.size(); ++i) {
+        const PageEntry &e = m_entries.at(i);
         QVariantMap row;
         row.insert("index", i);
-        row.insert("filePath", m_files.at(i));
-        row.insert("fileName", QFileInfo(m_files.at(i)).fileName());
+        row.insert("filePath", e.sourcePath);
+        row.insert("fileName", QFileInfo(e.sourcePath).fileName());
+        row.insert("isPdfPage", e.isPdfPage);
+        row.insert("sourcePageIndex", e.sourcePageIndex);
+        row.insert("pageNumber", i + 1);
         row.insert("selected", m_selectedIndices.contains(i));
         items.append(row);
     }
@@ -287,21 +306,40 @@ void Backend::setPrintSelectionOnly(bool enabled) {
 }
 
 QImage Backend::thumbnailForIndex(int index) const {
-    if (index < 0 || index >= m_files.size())
+    if (index < 0 || index >= m_entries.size())
         return {};
+    if (index == m_currentIndex && !m_displayImage.isNull())
+        return m_displayImage.scaled(220, 220, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     if (m_thumbCache.contains(index))
         return m_thumbCache.value(index);
 
-    const QString path = m_files.at(index);
-    QImageReader reader(path);
-    reader.setAutoTransform(true);
-    const QSize orig = reader.size();
-    if (orig.isValid() && !orig.isEmpty()) {
-        const QSize scaled = orig.scaled(220, 220, Qt::KeepAspectRatio);
-        if (scaled.isValid() && !scaled.isEmpty())
-            reader.setScaledSize(scaled);
+    const PageEntry &entry = m_entries.at(index);
+    QImage thumb;
+    if (entry.isPdfPage) {
+        thumb = PdfDocument::renderPage(entry.sourcePath, entry.sourcePageIndex, 36.0);
+        if (!thumb.isNull() && !entry.edit.isIdentity()) {
+            EditState thumbEdit = entry.edit;
+            thumbEdit.cropRect = QRect();
+            thumbEdit.resizeTarget = QSize();
+            thumb = ImageOps::applyEdits(thumb, thumbEdit, false);
+        }
+    } else {
+        QImageReader reader(entry.sourcePath);
+        reader.setAutoTransform(true);
+        const QSize orig = reader.size();
+        if (orig.isValid() && !orig.isEmpty()) {
+            const QSize scaled = orig.scaled(220, 220, Qt::KeepAspectRatio);
+            if (scaled.isValid() && !scaled.isEmpty())
+                reader.setScaledSize(scaled);
+        }
+        thumb = reader.read();
+        if (!thumb.isNull() && !entry.edit.isIdentity()) {
+            EditState thumbEdit = entry.edit;
+            thumbEdit.cropRect = QRect();
+            thumbEdit.resizeTarget = QSize();
+            thumb = ImageOps::applyEdits(thumb, thumbEdit, false);
+        }
     }
-    QImage thumb = reader.read();
     if (!thumb.isNull() && (thumb.width() > 220 || thumb.height() > 220))
         thumb = thumb.scaled(220, 220, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     m_thumbCache.insert(index, thumb);
@@ -322,59 +360,128 @@ QImage Backend::printableImage() const {
 
 QVector<int> Backend::activeBatchIndices() const {
     QVector<int> indices;
-    if (!m_selectedIndices.isEmpty()) {
+    if (m_entries.isEmpty())
+        return indices;
+
+    if (m_pageRangeMode == "current") {
+        if (m_currentIndex >= 0 && m_currentIndex < m_entries.size())
+            indices.append(m_currentIndex);
+        return indices;
+    }
+
+    if (m_pageRangeMode == "range") {
+        bool ok = false;
+        indices = PdfDocument::parsePageRange(m_pageRangeText, m_entries.size(), &ok);
+        if (ok && !indices.isEmpty())
+            return indices;
+        if (m_currentIndex >= 0 && m_currentIndex < m_entries.size())
+            return {m_currentIndex};
+        return {0};
+    }
+
+    if (m_pageRangeMode == "selected" && !m_selectedIndices.isEmpty()) {
         for (int idx : m_selectedIndices) {
-            if (idx >= 0 && idx < m_files.size())
+            if (idx >= 0 && idx < m_entries.size())
                 indices.append(idx);
         }
         std::sort(indices.begin(), indices.end());
-    } else {
-        indices.reserve(m_files.size());
-        for (int i = 0; i < m_files.size(); ++i)
-            indices.append(i);
+        return indices;
     }
+
+    indices.reserve(m_entries.size());
+    for (int i = 0; i < m_entries.size(); ++i)
+        indices.append(i);
     return indices;
 }
 
-QVector<QVector<QImage>> Backend::buildPrintPages() const {
+QImage Backend::renderEntryForPrint(int idx, bool highRes) const {
+    if (idx < 0 || idx >= m_entries.size())
+        return {};
+
+    const PageEntry &entry = m_entries.at(idx);
+    const EditState &edit = (idx == m_currentIndex) ? m_edit : entry.edit;
+
+    if (idx == m_currentIndex && (!entry.isPdfPage || !highRes))
+        return printableImage();
+
+    QImage raw;
+    if (entry.isPdfPage) {
+        const double dpi = highRes ? 300.0 : 150.0;
+        const QString cacheKey = entry.sourcePath + "#" + QString::number(entry.sourcePageIndex) + "@" + QString::number(static_cast<int>(dpi));
+        if (!highRes && m_batchImageCache.contains(cacheKey)) {
+            raw = m_batchImageCache.value(cacheKey);
+        } else {
+            raw = PdfDocument::renderPage(entry.sourcePath, entry.sourcePageIndex, dpi);
+            if (!highRes && !raw.isNull() && m_batchImageCache.size() < 48)
+                m_batchImageCache.insert(cacheKey, raw);
+        }
+        if (raw.isNull())
+            return {};
+
+        EditState scaledEdit = edit;
+        if (highRes) {
+            // Viewer edits (crop/resize) are recorded in 150-DPI coordinates; scale 2x for 300-DPI print output.
+            if (!scaledEdit.cropRect.isEmpty()) {
+                scaledEdit.cropRect = QRect(scaledEdit.cropRect.x() * 2,
+                                            scaledEdit.cropRect.y() * 2,
+                                            scaledEdit.cropRect.width() * 2,
+                                            scaledEdit.cropRect.height() * 2);
+            }
+            if (!scaledEdit.resizeTarget.isEmpty()) {
+                scaledEdit.resizeTarget = QSize(scaledEdit.resizeTarget.width() * 2,
+                                                scaledEdit.resizeTarget.height() * 2);
+            }
+        }
+        QImage out = ImageOps::applyEdits(raw, scaledEdit, m_printSettings.grayscale);
+        if (idx == m_currentIndex && m_printSelectionOnly && hasSelection() && !out.isNull()) {
+            const int sx = static_cast<int>(std::round(m_selectionNorm.x() * out.width()));
+            const int sy = static_cast<int>(std::round(m_selectionNorm.y() * out.height()));
+            const int sw = static_cast<int>(std::round(m_selectionNorm.width() * out.width()));
+            const int sh = static_cast<int>(std::round(m_selectionNorm.height() * out.height()));
+            const QRect crop = QRect(sx, sy, sw, sh).intersected(out.rect());
+            if (crop.isValid() && crop.width() >= 2 && crop.height() >= 2)
+                out = out.copy(crop);
+        }
+        return out;
+    }
+
+    const QString path = entry.sourcePath;
+    if (m_batchImageCache.contains(path)) {
+        raw = m_batchImageCache.value(path);
+    } else {
+        QImageReader reader(path);
+        reader.setAutoTransform(true);
+        raw = reader.read();
+        if (!raw.isNull() && m_batchImageCache.size() < 48)
+            m_batchImageCache.insert(path, raw);
+    }
+    if (raw.isNull())
+        return {};
+    return ImageOps::applyEdits(raw, edit, m_printSettings.grayscale);
+}
+
+QVector<QVector<QImage>> Backend::buildPrintPages(bool highRes) const {
     if (!hasImage())
         return {};
 
-    if (m_multiMode == "selected" && m_files.size() > 1) {
+    if (m_pageRangeMode != "current" && m_entries.size() > 1) {
         const QVector<int> indices = activeBatchIndices();
         QVector<QImage> batch;
         batch.reserve(indices.size());
         for (int idx : indices) {
-            if (idx == m_currentIndex) {
-                batch.append(printableImage());
-                continue;
-            }
-            const QString path = m_files.at(idx);
-            QImage raw;
-            if (m_batchImageCache.contains(path)) {
-                raw = m_batchImageCache.value(path);
-            } else {
-                QImageReader reader(path);
-                reader.setAutoTransform(true);
-                raw = reader.read();
-                if (!raw.isNull())
-                    m_batchImageCache.insert(path, raw);
-            }
-            if (!raw.isNull()) {
-                batch.append(m_printSettings.grayscale
-                                 ? PrintRenderer::applyTransforms(raw, 0, false, false, true)
-                                 : raw);
-            }
+            const QImage rendered = renderEntryForPrint(idx, highRes);
+            if (!rendered.isNull())
+                batch.append(rendered);
         }
         if (!batch.isEmpty())
             return PrintRenderer::paginateImages(batch, m_printSettings.perPage, false);
     }
 
-    return PrintRenderer::paginateImages({printableImage()}, m_printSettings.perPage, true);
+    return PrintRenderer::paginateImages({renderEntryForPrint(m_currentIndex, highRes)}, m_printSettings.perPage, true);
 }
 
 QVector<QImage> Backend::previewPageImages() const {
-    const QVector<QVector<QImage>> pages = buildPrintPages();
+    const QVector<QVector<QImage>> pages = buildPrintPages(false);
     if (pages.isEmpty())
         return {};
     const int idx = std::clamp(m_previewPageIndex, 0, static_cast<int>(pages.size()) - 1);
@@ -526,12 +633,57 @@ void Backend::setPerPage(int count) {
 
 void Backend::setMultiMode(const QString &mode) {
     const QString normalized = (mode == "selected") ? QStringLiteral("selected") : QStringLiteral("repeat");
-    if (normalized == m_multiMode)
+    const QString nextRange = (normalized == "selected")
+                                  ? (m_selectedIndices.isEmpty() ? QStringLiteral("all") : QStringLiteral("selected"))
+                                  : QStringLiteral("current");
+    if (normalized == m_multiMode && nextRange == m_pageRangeMode)
         return;
     m_multiMode = normalized;
+    m_pageRangeMode = nextRange;
     m_previewPageIndex = 0;
     clampPreviewPage();
     emit printSettingsChanged();
+}
+
+void Backend::setPageRangeMode(const QString &mode) {
+    QString normalized = QStringLiteral("current");
+    if (mode == "all" || mode == "selected" || mode == "range")
+        normalized = mode;
+    const QString nextMulti = (normalized == "current") ? QStringLiteral("repeat") : QStringLiteral("selected");
+    if (normalized == m_pageRangeMode && nextMulti == m_multiMode)
+        return;
+    m_pageRangeMode = normalized;
+    m_multiMode = nextMulti;
+    m_previewPageIndex = 0;
+    clampPreviewPage();
+    emit printSettingsChanged();
+}
+
+void Backend::setPageRangeText(const QString &text) {
+    if (text == m_pageRangeText)
+        return;
+    m_pageRangeText = text;
+    if (m_pageRangeMode == "range") {
+        m_previewPageIndex = 0;
+        clampPreviewPage();
+    }
+    emit printSettingsChanged();
+}
+
+bool Backend::pageRangeValid() const {
+    if (m_pageRangeMode != "range")
+        return true;
+    bool ok = false;
+    PdfDocument::parsePageRange(m_pageRangeText, m_entries.size(), &ok);
+    return ok;
+}
+
+int Backend::activePageCount() const {
+    if (!hasImage())
+        return 0;
+    if (m_pageRangeMode == "current")
+        return 1;
+    return static_cast<int>(activeBatchIndices().size());
 }
 
 void Backend::setCutGuides(bool enabled) {
@@ -554,7 +706,7 @@ void Backend::setPreviewPageIndex(int index) {
 int Backend::previewPageCount() const {
     if (!hasImage())
         return 0;
-    if (m_multiMode == "selected" && m_files.size() > 1) {
+    if (m_pageRangeMode != "current" && m_entries.size() > 1) {
         const int itemCount = std::max(1, static_cast<int>(activeBatchIndices().size()));
         const int n = PrintRenderer::normalizePerPage(m_printSettings.perPage);
         return (itemCount + n - 1) / n;
@@ -610,12 +762,26 @@ bool Backend::openFiles(const QStringList &paths) {
 
     if (resolved.isEmpty()) {
         if (m_errorMessage.isEmpty())
-            setError(tr("No supported image files found."));
+            setError(tr("No supported image or PDF files found."));
         return false;
     }
 
+    QVector<PageEntry> entries;
+    bool pdfMode = false;
     int startIndex = 0;
-    if (resolved.size() == 1) {
+
+    if (resolved.size() == 1 && PdfDocument::isPdfFile(resolved.first())) {
+        QString pdfErr;
+        const int pages = PdfDocument::pageCount(resolved.first(), &pdfErr);
+        if (pages <= 0) {
+            setError(pdfErr.isEmpty() ? tr("Could not open PDF: %1").arg(QFileInfo(resolved.first()).fileName()) : pdfErr);
+            return false;
+        }
+        entries.reserve(pages);
+        for (int p = 0; p < pages; ++p)
+            entries.append({true, resolved.first(), p, EditState{}, false});
+        pdfMode = true;
+    } else if (resolved.size() == 1) {
         const QFileInfo single(resolved.first());
         const QString targetPath = single.absoluteFilePath();
         QDir dir = single.dir();
@@ -635,20 +801,54 @@ bool Backend::openFiles(const QStringList &paths) {
         if (!siblings.contains(targetPath))
             siblings.prepend(targetPath);
 
-        m_files = siblings;
-        startIndex = m_files.indexOf(targetPath);
+        entries.reserve(siblings.size());
+        for (const QString &sib : siblings)
+            entries.append({false, sib, 0, EditState{}, false});
+        startIndex = siblings.indexOf(targetPath);
     } else {
         resolved.removeDuplicates();
-        m_files = resolved;
+        for (const QString &p : resolved) {
+            if (PdfDocument::isPdfFile(p)) {
+                QString pdfErr;
+                const int pages = PdfDocument::pageCount(p, &pdfErr);
+                if (pages <= 0) {
+                    setError(pdfErr);
+                    continue;
+                }
+                pdfMode = true;
+                for (int i = 0; i < pages; ++i)
+                    entries.append({true, p, i, EditState{}, false});
+            } else {
+                entries.append({false, p, 0, EditState{}, false});
+            }
+        }
     }
 
+    if (entries.isEmpty()) {
+        if (m_errorMessage.isEmpty())
+            setError(tr("No supported image or PDF files found."));
+        return false;
+    }
+
+    m_entries = std::move(entries);
+    m_isPdfMode = pdfMode;
+    m_documentDirty = false;
+    m_currentIndex = -1;
     m_selectedIndices.clear();
     m_thumbCache.clear();
     m_batchImageCache.clear();
+    m_pageRangeText.clear();
+    if (m_isPdfMode && m_entries.size() > 1) {
+        m_pageRangeMode = "all";
+        m_multiMode = "selected";
+    } else {
+        m_pageRangeMode = "current";
+        m_multiMode = "repeat";
+    }
     ++m_fileListVersion;
     emit filesChanged();
 
-    return loadIndex(startIndex);
+    return loadIndex(std::max(0, startIndex));
 }
 
 bool Backend::openUrls(const QList<QUrl> &urls) {
@@ -667,31 +867,31 @@ void Backend::openFileDialog() {
         return;
     }
     m_filePicker->openImages(
-        tr("Open Image"),
+        tr("Open Image or PDF"),
         [this](const QStringList &paths) { openFiles(paths); },
         [this](const QString &error) { setError(error); });
 }
 
 void Backend::selectIndex(int index) {
-    if (index < 0 || index >= m_files.size() || index == m_currentIndex)
+    if (index < 0 || index >= m_entries.size() || index == m_currentIndex)
         return;
     loadIndex(index);
 }
 
 void Backend::nextImage() {
-    if (m_files.size() < 2)
+    if (m_entries.size() < 2)
         return;
-    loadIndex((m_currentIndex + 1) % m_files.size());
+    loadIndex((m_currentIndex + 1) % m_entries.size());
 }
 
 void Backend::previousImage() {
-    if (m_files.size() < 2)
+    if (m_entries.size() < 2)
         return;
-    loadIndex((m_currentIndex - 1 + m_files.size()) % m_files.size());
+    loadIndex((m_currentIndex - 1 + m_entries.size()) % m_entries.size());
 }
 
 void Backend::toggleFileSelected(int index) {
-    if (index < 0 || index >= m_files.size())
+    if (index < 0 || index >= m_entries.size())
         return;
     if (m_selectedIndices.contains(index))
         m_selectedIndices.remove(index);
@@ -703,7 +903,7 @@ void Backend::toggleFileSelected(int index) {
 }
 
 void Backend::selectRangeTo(int index) {
-    if (index < 0 || index >= m_files.size())
+    if (index < 0 || index >= m_entries.size())
         return;
     const int anchor = m_currentIndex >= 0 ? m_currentIndex : 0;
     const int lo = std::min(anchor, index);
@@ -716,9 +916,9 @@ void Backend::selectRangeTo(int index) {
 }
 
 void Backend::selectAllFiles() {
-    if (m_files.isEmpty())
+    if (m_entries.isEmpty())
         return;
-    for (int i = 0; i < m_files.size(); ++i)
+    for (int i = 0; i < m_entries.size(); ++i)
         m_selectedIndices.insert(i);
     clampPreviewPage();
     emit filesChanged();
@@ -732,6 +932,175 @@ void Backend::clearFileSelection() {
     clampPreviewPage();
     emit filesChanged();
     emit printSettingsChanged();
+}
+
+bool Backend::movePage(int fromIndex, int toIndex) {
+    if (fromIndex < 0 || fromIndex >= m_entries.size() ||
+        toIndex < 0 || toIndex >= m_entries.size() || fromIndex == toIndex)
+        return false;
+
+    commitColorEdit();
+    syncCurrentEntryEdits();
+
+    PageEntry moved = m_entries.takeAt(fromIndex);
+    m_entries.insert(toIndex, moved);
+
+    // Remap current index and multi-selection set cleanly.
+    auto remap = [fromIndex, toIndex](int idx) {
+        if (idx == fromIndex)
+            return toIndex;
+        if (fromIndex < toIndex && idx > fromIndex && idx <= toIndex)
+            return idx - 1;
+        if (fromIndex > toIndex && idx >= toIndex && idx < fromIndex)
+            return idx + 1;
+        return idx;
+    };
+
+    m_currentIndex = remap(m_currentIndex);
+    QSet<int> remappedSel;
+    for (int idx : m_selectedIndices)
+        remappedSel.insert(remap(idx));
+    m_selectedIndices = remappedSel;
+
+    m_isPdfMode = true;
+    m_documentDirty = true;
+    m_thumbCache.clear();
+    ++m_fileListVersion;
+    clampPreviewPage();
+
+    if (m_currentIndex >= 0 && m_currentIndex < m_entries.size()) {
+        const PageEntry &cur = m_entries.at(m_currentIndex);
+        m_metadata = Inspector::readMetadata(cur.sourcePath, m_displayImage,
+                                             cur.isPdfPage ? cur.sourcePageIndex : -1,
+                                             m_isPdfMode ? m_entries.size() : 0);
+    }
+
+    emit filesChanged();
+    emit imageChanged();
+    emit printSettingsChanged();
+    return true;
+}
+
+bool Backend::moveCurrentPageUp() {
+    return movePage(m_currentIndex, m_currentIndex - 1);
+}
+
+bool Backend::moveCurrentPageDown() {
+    return movePage(m_currentIndex, m_currentIndex + 1);
+}
+
+bool Backend::deletePage(int index) {
+    if (m_entries.size() <= 1 || index < 0 || index >= m_entries.size())
+        return false;
+
+    commitColorEdit();
+    syncCurrentEntryEdits();
+
+    const bool deletingCurrent = (index == m_currentIndex);
+    m_entries.removeAt(index);
+
+    QSet<int> remappedSel;
+    for (int idx : m_selectedIndices) {
+        if (idx == index)
+            continue;
+        remappedSel.insert(idx > index ? idx - 1 : idx);
+    }
+    m_selectedIndices = remappedSel;
+
+    m_isPdfMode = true;
+    m_documentDirty = true;
+    m_thumbCache.clear();
+    ++m_fileListVersion;
+
+    if (deletingCurrent) {
+        const int nextIndex = std::clamp(index, 0, static_cast<int>(m_entries.size()) - 1);
+        m_currentIndex = -1;
+        emit filesChanged();
+        loadIndex(nextIndex);
+    } else {
+        if (index < m_currentIndex)
+            --m_currentIndex;
+        if (m_currentIndex >= 0 && m_currentIndex < m_entries.size()) {
+            const PageEntry &cur = m_entries.at(m_currentIndex);
+            m_metadata = Inspector::readMetadata(cur.sourcePath, m_displayImage,
+                                                 cur.isPdfPage ? cur.sourcePageIndex : -1,
+                                                 m_isPdfMode ? m_entries.size() : 0);
+        }
+        clampPreviewPage();
+        emit filesChanged();
+        emit imageChanged();
+        emit printSettingsChanged();
+    }
+    setStatus(tr("Removed page (original file unchanged)"));
+    return true;
+}
+
+bool Backend::deleteCurrentPage() {
+    return deletePage(m_currentIndex);
+}
+
+bool Backend::appendFiles(const QStringList &paths) {
+    clearMessages();
+    if (paths.isEmpty())
+        return false;
+    if (m_entries.isEmpty())
+        return openFiles(paths);
+
+    commitColorEdit();
+    syncCurrentEntryEdits();
+
+    int added = 0;
+    for (const QString &raw : paths) {
+        const QFileInfo fi(raw);
+        if (!fi.exists() || !fi.isFile())
+            continue;
+        const QString abs = fi.absoluteFilePath();
+        if (PdfDocument::isPdfFile(abs)) {
+            QString err;
+            const int pages = PdfDocument::pageCount(abs, &err);
+            if (pages <= 0) {
+                setError(err);
+                continue;
+            }
+            for (int p = 0; p < pages; ++p) {
+                m_entries.append({true, abs, p, EditState{}, false});
+                ++added;
+            }
+        } else if (isSupportedImageFile(abs)) {
+            m_entries.append({false, abs, 0, EditState{}, false});
+            ++added;
+        }
+    }
+
+    if (added == 0) {
+        if (m_errorMessage.isEmpty())
+            setError(tr("No supported image or PDF files to merge."));
+        return false;
+    }
+
+    m_isPdfMode = true;
+    m_documentDirty = true;
+    m_pageRangeMode = "all";
+    m_multiMode = "selected";
+    m_thumbCache.clear();
+    ++m_fileListVersion;
+    clampPreviewPage();
+    emit filesChanged();
+    emit imageChanged();
+    emit printSettingsChanged();
+    setStatus(tr("Added %n pages", "", added));
+    return true;
+}
+
+void Backend::appendFilesDialog() {
+    if (!m_filePicker) {
+        setError(tr("File picker is unavailable."));
+        return;
+    }
+    m_filePicker->openImages(
+        tr("Merge PDF or Images"),
+        [this](const QStringList &paths) { appendFiles(paths); },
+        [this](const QString &error) { setError(error); });
 }
 
 void Backend::setSelectionRect(double x, double y, double w, double h) {
@@ -1070,7 +1439,17 @@ bool Backend::exportImageTo(const QString &outputPath) {
     QString err;
     bool ok = false;
     if (norm == "pdf") {
-        ok = PrintRenderer::exportPdf(finalPath, buildPrintPages(), m_printSettings, &err);
+        if (!pageRangeValid()) {
+            setError(tr("Invalid page range. Use numbers like 1-3, 5."));
+            return false;
+        }
+        ok = PrintRenderer::exportPdf(finalPath, buildPrintPages(true), m_printSettings, &err);
+        if (ok) {
+            m_documentDirty = false;
+            for (auto &entry : m_entries)
+                entry.dirty = false;
+            emit filesChanged();
+        }
     } else {
         ok = ImageOps::exportImageAtomic(m_displayImage, finalPath, norm, m_exportQuality, &err);
     }
@@ -1081,6 +1460,8 @@ bool Backend::exportImageTo(const QString &outputPath) {
     }
 
     m_exportedEditVersion = m_editVersion;
+    if (m_currentIndex >= 0 && m_currentIndex < m_entries.size())
+        m_entries[m_currentIndex].dirty = false;
     emit imageChanged();
     setStatus(tr("Exported %1").arg(QFileInfo(finalPath).fileName()));
     return true;
@@ -1089,10 +1470,18 @@ bool Backend::exportImageTo(const QString &outputPath) {
 void Backend::preparePrintSheet() {
     commitColorEdit();
     refreshPrinters();
-    if (m_selectedIndices.size() > 1)
+    if (m_selectedIndices.size() > 1) {
+        m_pageRangeMode = "selected";
         m_multiMode = "selected";
-    else if (m_selectedIndices.isEmpty() && m_multiMode == "selected" && m_files.size() <= 1)
+    } else if (m_isPdfMode && m_entries.size() > 1) {
+        if (m_pageRangeMode != "range" && m_pageRangeMode != "current") {
+            m_pageRangeMode = "all";
+            m_multiMode = "selected";
+        }
+    } else if (m_selectedIndices.isEmpty() && m_entries.size() <= 1) {
+        m_pageRangeMode = "current";
         m_multiMode = "repeat";
+    }
     m_previewPageIndex = 0;
     clampPreviewPage();
     emit printSettingsChanged();
@@ -1144,8 +1533,12 @@ void Backend::printCurrent() {
     }
     if (m_printBusy)
         return;
+    if (!pageRangeValid()) {
+        setError(tr("Invalid page range. Use numbers like 1-3, 5."));
+        return;
+    }
 
-    const QVector<QVector<QImage>> pages = buildPrintPages();
+    const QVector<QVector<QImage>> pages = buildPrintPages(true);
     const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     const QString tempPdf = QDir(tempDir).filePath(
         "peek-print-" + QUuid::createUuid().toString(QUuid::Id128) + ".pdf");
@@ -1177,7 +1570,8 @@ void Backend::savePdfDialog() {
     }
 
     const QFileInfo info(filePath());
-    const QString suggested = info.completeBaseName() + ".pdf";
+    const QString suffix = (m_isPdfMode || hasDocumentChanges()) ? "-edited" : "";
+    const QString suggested = info.completeBaseName() + suffix + ".pdf";
     m_filePicker->savePdf(
         tr("Save as PDF"),
         suggested,
@@ -1192,17 +1586,31 @@ bool Backend::savePdfTo(const QString &outputPath) {
         setError(tr("Open an image before saving a PDF."));
         return false;
     }
+    if (!pageRangeValid()) {
+        setError(tr("Invalid page range. Use numbers like 1-3, 5."));
+        return false;
+    }
+
+    commitColorEdit();
+    syncCurrentEntryEdits();
 
     QString finalPath = outputPath;
     if (!finalPath.endsWith(".pdf", Qt::CaseInsensitive))
         finalPath += ".pdf";
 
     QString err;
-    if (!PrintRenderer::exportPdf(finalPath, buildPrintPages(), m_printSettings, &err)) {
+    if (!PrintRenderer::exportPdf(finalPath, buildPrintPages(true), m_printSettings, &err)) {
         setError(err);
         return false;
     }
 
+    PdfDocument::evictCache(finalPath);
+    m_documentDirty = false;
+    for (auto &entry : m_entries)
+        entry.dirty = false;
+    m_exportedEditVersion = m_editVersion;
+    emit filesChanged();
+    emit imageChanged();
     setStatus(tr("Saved PDF to %1").arg(QFileInfo(finalPath).fileName()));
     return true;
 }
@@ -1555,29 +1963,54 @@ QString Backend::friendlyCupsValue(const QString &value) {
     return value;
 }
 
+void Backend::syncCurrentEntryEdits() {
+    if (m_currentIndex < 0 || m_currentIndex >= m_entries.size())
+        return;
+    m_entries[m_currentIndex].edit = m_edit;
+    m_entries[m_currentIndex].dirty = !m_edit.isIdentity() && (m_editVersion != m_exportedEditVersion);
+    m_thumbCache.remove(m_currentIndex);
+}
+
 bool Backend::loadIndex(int index) {
-    if (index < 0 || index >= m_files.size())
+    if (index < 0 || index >= m_entries.size())
         return false;
 
-    const QString path = m_files.at(index);
-    QImageReader reader(path);
-    reader.setAutoTransform(true);
-    const QImage loaded = reader.read();
-    if (loaded.isNull()) {
-        setError(tr("Could not open %1: %2").arg(QFileInfo(path).fileName(), reader.errorString()));
-        return false;
+    if (m_currentIndex >= 0 && m_currentIndex < m_entries.size()) {
+        commitColorEdit();
+        syncCurrentEntryEdits();
+    }
+
+    const PageEntry &entry = m_entries.at(index);
+    QImage loaded;
+    if (entry.isPdfPage) {
+        QString pdfErr;
+        loaded = PdfDocument::renderPage(entry.sourcePath, entry.sourcePageIndex, 150.0, &pdfErr);
+        if (loaded.isNull()) {
+            setError(pdfErr.isEmpty()
+                         ? tr("Could not render page %1 of %2").arg(entry.sourcePageIndex + 1).arg(QFileInfo(entry.sourcePath).fileName())
+                         : pdfErr);
+            return false;
+        }
+    } else {
+        QImageReader reader(entry.sourcePath);
+        reader.setAutoTransform(true);
+        loaded = reader.read();
+        if (loaded.isNull()) {
+            setError(tr("Could not open %1: %2").arg(QFileInfo(entry.sourcePath).fileName(), reader.errorString()));
+            return false;
+        }
     }
 
     m_currentIndex = index;
     m_sourceImage = loaded;
-    m_edit = EditState{};
+    m_edit = entry.edit;
     m_colorEditing = false;
     m_undoStack.clear();
     m_redoStack.clear();
-    m_editVersion = 0;
+    m_editVersion = entry.dirty ? 1 : 0;
     m_exportedEditVersion = 0;
     if (!m_hasSavedExportFormat)
-        m_exportFormat = loaded.hasAlphaChannel() ? "png" : "jpeg";
+        m_exportFormat = entry.isPdfPage ? "pdf" : (loaded.hasAlphaChannel() ? "png" : "jpeg");
     clearSelection();
     rebuildPreColorImage();
     rebuildDisplayImageFromPreColor();
@@ -1602,6 +2035,11 @@ void Backend::applyEditState(const EditState &next, bool recordUndo) {
                                  m_edit.resizeTarget != next.resizeTarget;
     m_edit = next;
     ++m_editVersion;
+    if (m_currentIndex >= 0 && m_currentIndex < m_entries.size()) {
+        m_entries[m_currentIndex].edit = m_edit;
+        m_entries[m_currentIndex].dirty = !m_edit.isIdentity();
+        m_thumbCache.remove(m_currentIndex);
+    }
     if (geometryChanged)
         rebuildPreColorImage();
     rebuildDisplayImageFromPreColor();
@@ -1634,7 +2072,14 @@ void Backend::rebuildDisplayImageFromPreColor() {
     if (!m_edit.annotations.isEmpty())
         img = Markup::compositeAnnotations(img, m_edit.annotations);
     m_displayImage = img;
-    m_metadata = Inspector::readMetadata(filePath(), m_displayImage);
+    if (m_currentIndex >= 0 && m_currentIndex < m_entries.size()) {
+        const PageEntry &cur = m_entries.at(m_currentIndex);
+        m_metadata = Inspector::readMetadata(cur.sourcePath, m_displayImage,
+                                             cur.isPdfPage ? cur.sourcePageIndex : -1,
+                                             m_isPdfMode ? m_entries.size() : 0);
+    } else {
+        m_metadata = {};
+    }
     ++m_imageVersion;
     emit imageChanged();
 }

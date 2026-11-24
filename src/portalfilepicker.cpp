@@ -76,6 +76,19 @@ void PortalFilePicker::openImages(const QString &title,
                                   std::function<void(const QString &error)> onError) {
     QList<PortalFilter> filters;
     filters.append({
+        tr("Images & PDFs"),
+        {
+            {1, "image/png"},
+            {1, "image/jpeg"},
+            {1, "image/webp"},
+            {1, "image/bmp"},
+            {1, "image/gif"},
+            {1, "image/tiff"},
+            {1, "image/svg+xml"},
+            {1, "application/pdf"},
+        }
+    });
+    filters.append({
         tr("Images"),
         {
             {1, "image/png"},
@@ -87,6 +100,7 @@ void PortalFilePicker::openImages(const QString &title,
             {1, "image/svg+xml"},
         }
     });
+    filters.append({tr("PDF documents"), {{1, "application/pdf"}}});
     filters.append({tr("All files"), {{0, "*"}}});
 
     QVariantMap options;

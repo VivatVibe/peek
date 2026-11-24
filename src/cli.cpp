@@ -2,6 +2,7 @@
 #include "backend.h"
 #include "imageops.h"
 #include "inspector.h"
+#include "pdfdocument.h"
 #include "presetstore.h"
 #include "printrenderer.h"
 
@@ -37,19 +38,20 @@ void printError(const QString &message, bool json) {
 void printUsage() {
     QTextStream out(stdout);
     out << "Usage:\n"
-        << "  peek [open] [image ...]              Open images in the viewer\n"
+        << "  peek [open] [file ...]               Open images or PDFs in the viewer\n"
         << "  peek printers [--json]               List CUPS printers\n"
         << "  peek presets [--json]                List print presets\n"
-        << "  peek inspect <image> [--json]        Show image dimensions, print size, and EXIF\n"
-        << "  peek export <image ...> -o <out> [options] [--json]\n"
-        << "                                       Export image (PNG/JPG/WebP/TIFF/BMP) or PDF\n"
-        << "  peek print <image ...> [--printer NAME] [--preset NAME] [--copies N] [options] [--json]\n"
-        << "                                       Print image(s) via CUPS\n"
+        << "  peek inspect <file> [--json]         Show image/PDF dimensions, pages, and EXIF\n"
+        << "  peek export <file ...> -o <out> [options] [--json]\n"
+        << "                                       Export images/PDFs (PNG/JPG/WebP/TIFF/BMP/PDF)\n"
+        << "  peek print <file ...> [--printer NAME] [--preset NAME] [--copies N] [options] [--json]\n"
+        << "                                       Print image(s) or PDF pages via CUPS\n"
         << "  peek skill install                   Install the Peek agent skill\n"
         << "\n"
         << "Edit & export options:\n"
         << "  --format png|jpg|webp|tiff|bmp|pdf   Output format (defaults from -o extension)\n"
         << "  --quality <10-100>                   JPEG/WebP quality (default: 90)\n"
+        << "  --pages <range>                      1-based page range (e.g. 1-3,5)\n"
         << "  --crop <x,y,w,h>                     Crop rectangle in pixels\n"
         << "  --resize <WxH>                       Resize target in pixels\n"
         << "  --rotate <0|90|180|270>              Rotate clockwise\n"
@@ -104,6 +106,7 @@ struct CliJobOptions {
     bool autoLevels = false;
     QString format;
     int quality = 90;
+    QString pageRange;
     QString outputPath;
     QString printerName;
     bool json = false;
@@ -164,6 +167,8 @@ bool parseJobOptions(const QStringList &args, CliJobOptions &opts, QString &erro
             if (!requireValue(opts.outputPath)) return false;
         } else if (arg == "--printer" || arg == "-d") {
             if (!requireValue(opts.printerName)) return false;
+        } else if (arg == "--pages") {
+            if (!requireValue(opts.pageRange)) return false;
         } else if (arg == "--format") {
             QString v;
             if (!requireValue(v)) return false;
@@ -367,7 +372,7 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
     }
     if (cmd == "--version" || cmd == "-v") {
         QTextStream out(stdout);
-        out << "peek 0.5.1\n";
+        out << "peek 0.6.0\n";
         return 0;
     }
     if (cmd == "inspect") {
@@ -380,17 +385,30 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
             }
         }
         if (target.isEmpty()) {
-            printError("Specify an image file to inspect.", json);
+            printError("Specify an image or PDF file to inspect.", json);
             return 1;
         }
-        QImageReader reader(target);
-        reader.setAutoTransform(true);
-        const QImage loaded = reader.read();
-        if (loaded.isNull()) {
-            printError("Could not read image: " + reader.errorString(), json);
-            return 1;
+        const QString absTarget = QFileInfo(target).absoluteFilePath();
+        QImage loaded;
+        int pdfPageIndex = -1;
+        if (PdfDocument::isPdfFile(absTarget)) {
+            QString pdfErr;
+            loaded = PdfDocument::renderPage(absTarget, 0, 150.0, &pdfErr);
+            if (loaded.isNull()) {
+                printError(pdfErr.isEmpty() ? ("Could not read PDF: " + target) : pdfErr, json);
+                return 1;
+            }
+            pdfPageIndex = 0;
+        } else {
+            QImageReader reader(absTarget);
+            reader.setAutoTransform(true);
+            loaded = reader.read();
+            if (loaded.isNull()) {
+                printError("Could not read image: " + reader.errorString(), json);
+                return 1;
+            }
         }
-        const QVariantMap meta = Inspector::readMetadata(QFileInfo(target).absoluteFilePath(), loaded);
+        const QVariantMap meta = Inspector::readMetadata(absTarget, loaded, pdfPageIndex);
         if (json) {
             QJsonObject obj = QJsonObject::fromVariantMap(meta);
             obj.insert("ok", true);
@@ -398,16 +416,25 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
         } else {
             QTextStream out(stdout);
             out << meta.value("fileName").toString() << " (" << meta.value("format").toString() << ")\n";
-            out << "Dimensions: " << meta.value("width").toInt() << " x " << meta.value("height").toInt() << " px\n";
-            out << "Print @ 300 DPI: " << QString::number(meta.value("printWidthMm").toDouble(), 'f', 1)
-                << " x " << QString::number(meta.value("printHeightMm").toDouble(), 'f', 1) << " mm\n";
-            if (meta.value("hasExif").toBool()) {
-                if (meta.contains("camera")) out << "Camera: " << meta.value("camera").toString() << '\n';
-                if (meta.contains("dateTaken")) out << "Date Taken: " << meta.value("dateTaken").toString() << '\n';
-                if (meta.contains("exposureTime")) out << "Exposure: " << meta.value("exposureTime").toString() << '\n';
-                if (meta.contains("aperture")) out << "Aperture: " << meta.value("aperture").toString() << '\n';
-                if (meta.contains("iso")) out << "ISO: " << meta.value("iso").toString() << '\n';
-                if (meta.contains("focalLength")) out << "Focal Length: " << meta.value("focalLength").toString() << '\n';
+            if (meta.value("isPdf").toBool()) {
+                out << "Pages: " << meta.value("pdfPageCount").toInt() << '\n';
+                out << "Page Size: " << QString::number(meta.value("printWidthMm").toDouble(), 'f', 1)
+                    << " x " << QString::number(meta.value("printHeightMm").toDouble(), 'f', 1) << " mm\n";
+                if (meta.contains("pdfTitle")) out << "Title: " << meta.value("pdfTitle").toString() << '\n';
+                if (meta.contains("pdfAuthor")) out << "Author: " << meta.value("pdfAuthor").toString() << '\n';
+                if (meta.contains("pdfProducer")) out << "Producer: " << meta.value("pdfProducer").toString() << '\n';
+            } else {
+                out << "Dimensions: " << meta.value("width").toInt() << " x " << meta.value("height").toInt() << " px\n";
+                out << "Print @ 300 DPI: " << QString::number(meta.value("printWidthMm").toDouble(), 'f', 1)
+                    << " x " << QString::number(meta.value("printHeightMm").toDouble(), 'f', 1) << " mm\n";
+                if (meta.value("hasExif").toBool()) {
+                    if (meta.contains("camera")) out << "Camera: " << meta.value("camera").toString() << '\n';
+                    if (meta.contains("dateTaken")) out << "Date Taken: " << meta.value("dateTaken").toString() << '\n';
+                    if (meta.contains("exposureTime")) out << "Exposure: " << meta.value("exposureTime").toString() << '\n';
+                    if (meta.contains("aperture")) out << "Aperture: " << meta.value("aperture").toString() << '\n';
+                    if (meta.contains("iso")) out << "ISO: " << meta.value("iso").toString() << '\n';
+                    if (meta.contains("focalLength")) out << "Focal Length: " << meta.value("focalLength").toString() << '\n';
+                }
             }
         }
         return 0;
@@ -474,18 +501,58 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
             return 1;
         }
         if (opts.positionals.isEmpty()) {
-            printError("Specify at least one image file.", opts.json);
+            printError("Specify at least one image or PDF file.", opts.json);
+            return 1;
+        }
+
+        struct InputSource {
+            bool isPdf = false;
+            QString path;
+            int pageIndex = 0;
+        };
+        QVector<InputSource> sources;
+        for (const QString &inputPath : opts.positionals) {
+            if (PdfDocument::isPdfFile(inputPath)) {
+                QString pdfErr;
+                const int pages = PdfDocument::pageCount(inputPath, &pdfErr);
+                if (pages <= 0) {
+                    printError(pdfErr.isEmpty() ? ("Could not read PDF " + inputPath) : pdfErr, opts.json);
+                    return 1;
+                }
+                for (int p = 0; p < pages; ++p)
+                    sources.append({true, inputPath, p});
+            } else {
+                sources.append({false, inputPath, 0});
+            }
+        }
+
+        bool rangeOk = false;
+        const QVector<int> selectedIndices = PdfDocument::parsePageRange(opts.pageRange, sources.size(), &rangeOk);
+        if (!rangeOk || selectedIndices.isEmpty()) {
+            printError("Invalid --pages range: " + opts.pageRange, opts.json);
             return 1;
         }
 
         QVector<QImage> images;
-        for (const QString &imagePath : opts.positionals) {
-            QImageReader reader(imagePath);
-            reader.setAutoTransform(true);
-            const QImage loaded = reader.read();
-            if (loaded.isNull()) {
-                printError("Could not read image " + imagePath + ": " + reader.errorString(), opts.json);
-                return 1;
+        images.reserve(selectedIndices.size());
+        for (int idx : selectedIndices) {
+            const InputSource &src = sources.at(idx);
+            QImage loaded;
+            if (src.isPdf) {
+                QString pdfErr;
+                loaded = PdfDocument::renderPage(src.path, src.pageIndex, 300.0, &pdfErr);
+                if (loaded.isNull()) {
+                    printError(pdfErr.isEmpty() ? ("Could not render PDF " + src.path) : pdfErr, opts.json);
+                    return 1;
+                }
+            } else {
+                QImageReader reader(src.path);
+                reader.setAutoTransform(true);
+                loaded = reader.read();
+                if (loaded.isNull()) {
+                    printError("Could not read image " + src.path + ": " + reader.errorString(), opts.json);
+                    return 1;
+                }
             }
             EditState state = opts.edit;
             if (opts.autoLevels) {

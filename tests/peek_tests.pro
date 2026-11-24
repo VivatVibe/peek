@@ -1,5 +1,6 @@
 QT += core gui qml quick quickcontrols2 testlib dbus
-CONFIG += c++17 testcase
+CONFIG += c++17 testcase link_pkgconfig
+PKGCONFIG += poppler-qt6
 TARGET = peek_tests
 TEMPLATE = app
 
@@ -12,6 +13,7 @@ HEADERS += \
     ../src/imageops.h \
     ../src/inspector.h \
     ../src/markup.h \
+    ../src/pdfdocument.h \
     ../src/presetstore.h \
     ../src/printrenderer.h \
     ../src/theme.h \
@@ -24,6 +26,7 @@ SOURCES += \
     ../src/imageops.cpp \
     ../src/inspector.cpp \
     ../src/markup.cpp \
+    ../src/pdfdocument.cpp \
     ../src/presetstore.cpp \
     ../src/printrenderer.cpp \
     ../src/theme.cpp \

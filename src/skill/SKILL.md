@@ -1,27 +1,29 @@
 ---
 name: peek
 description: >
-  Preview images, crop/resize/color-adjust/convert formats, export print-ready
-  PDFs, and print images via CUPS using the peek desktop app and headless CLI.
+  Preview images and PDFs, organize/merge PDF pages, crop/resize/color-adjust/convert
+  formats, export print-ready PDFs, and print via CUPS using the peek desktop app
+  and headless CLI.
 ---
 
 # Peek
 
-`peek` is an Omarchy image viewer, quick editor, and print utility with headless CLI support.
+`peek` is an Omarchy image & PDF viewer, quick editor, and print utility with headless CLI support.
 
 ## Commands
 
-- `peek [open] <image ...>` — Open image(s) in the desktop viewer.
+- `peek [open] <file ...>` — Open image(s) or PDF document(s) in the desktop viewer.
 - `peek printers --json` — List configured CUPS printers and the default destination.
 - `peek presets --json` — List built-in and saved print presets.
-- `peek inspect <image> [--json]` — Show image dimensions, 300 DPI print size, and EXIF camera metadata.
-- `peek export <image ...> -o <out> [options] --json` — Export edited image (PNG/JPEG/WebP/TIFF/BMP) or print-ready 300 DPI PDF.
-- `peek print <image ...> [--printer <name>] [--preset <name>] [--copies <n>] [options] --json` — Render and send image(s) directly to CUPS.
+- `peek inspect <file> [--json]` — Show image dimensions, 300 DPI print size, and EXIF metadata, or PDF page count, physical page size, and document info.
+- `peek export <file ...> -o <out> [options] --json` — Export edited image (PNG/JPEG/WebP/TIFF/BMP) or merge/slice/export print-ready 300 DPI PDF.
+- `peek print <file ...> [--printer <name>] [--preset <name>] [--copies <n>] [options] --json` — Render and send image(s) or PDF pages directly to CUPS.
 
 ## Edit & export options
 
 - `--format png|jpg|webp|tiff|bmp|pdf` (inferred from `-o` extension if omitted)
 - `--quality <10-100>` (default: `90` for JPEG/WebP)
+- `--pages <range>` (1-based page selection, e.g. `1-3,5`)
 - `--crop <x,y,w,h>` (crop rectangle in pixels)
 - `--resize <WxH>` (resize target in pixels)
 - `--rotate 0|90|180|270` (clockwise degrees)

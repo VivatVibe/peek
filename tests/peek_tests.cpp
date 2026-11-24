@@ -11,6 +11,7 @@
 #include "imageops.h"
 #include "inspector.h"
 #include "markup.h"
+#include "pdfdocument.h"
 #include "presetstore.h"
 #include "printrenderer.h"
 #include "theme.h"
@@ -621,6 +622,122 @@ private slots:
         QImageReader reader(outJpg);
         QCOMPARE(reader.format(), QByteArray("jpeg"));
         QCOMPARE(reader.size(), QSize(100, 50));
+    }
+
+    void pdfRangeParserHandlesRangesAndErrors() {
+        bool ok = false;
+        QCOMPARE(PdfDocument::parsePageRange("", 4, &ok), QVector<int>({0, 1, 2, 3}));
+        QVERIFY(ok);
+
+        QCOMPARE(PdfDocument::parsePageRange("1-3, 5", 6, &ok), QVector<int>({0, 1, 2, 4}));
+        QVERIFY(ok);
+
+        // Deduplicates overlapping entries while preserving order.
+        QCOMPARE(PdfDocument::parsePageRange("3, 1-3, 2", 5, &ok), QVector<int>({2, 0, 1}));
+        QVERIFY(ok);
+
+        // Rejects out-of-range, inverted, or malformed syntax.
+        QVERIFY(PdfDocument::parsePageRange("0-2", 5, &ok).isEmpty());
+        QVERIFY(!ok);
+        QVERIFY(PdfDocument::parsePageRange("4-2", 5, &ok).isEmpty());
+        QVERIFY(!ok);
+        QVERIFY(PdfDocument::parsePageRange("1-6", 5, &ok).isEmpty());
+        QVERIFY(!ok);
+        QVERIFY(PdfDocument::parsePageRange("1,,3", 5, &ok).isEmpty());
+        QVERIFY(!ok);
+        QVERIFY(PdfDocument::parsePageRange("abc", 5, &ok).isEmpty());
+        QVERIFY(!ok);
+    }
+
+    void opensReordersDeletesMergesAndPrintsPdfPages() {
+        QTemporaryDir dir;
+        const QString imgRed = makeImage(dir.path(), "r.png", 320, 420, QColor("#e63946"));
+        const QString imgGreen = makeImage(dir.path(), "g.png", 320, 420, QColor("#2a9d8f"));
+        const QString imgBlue = makeImage(dir.path(), "b.png", 320, 420, QColor("#457b9d"));
+        const QString imgGold = makeImage(dir.path(), "y.png", 320, 420, QColor("#e9c46a"));
+
+        PrintSettings ps;
+        ps.paperSize = "a4";
+        ps.orientation = "portrait";
+
+        const QString pdfA = dir.filePath("docA.pdf");
+        QVERIFY(PrintRenderer::exportPdf(pdfA, {{QImage(imgRed)}, {QImage(imgGreen)}, {QImage(imgBlue)}}, ps));
+        const QString pdfB = dir.filePath("docB.pdf");
+        QVERIFY(PrintRenderer::exportPdf(pdfB, QImage(imgGold), ps));
+
+        const QByteArray origPdfABytes = readFile(pdfA);
+        QVERIFY(PdfDocument::isPdfFile(pdfA));
+        QCOMPARE(PdfDocument::pageCount(pdfA), 3);
+
+        Backend backend(nullptr, "/nonexistent/lpstat", "/bin/true", "/nonexistent/lpoptions", dir.filePath("presets.json"));
+        QVERIFY(backend.openFiles({pdfA}));
+        QVERIFY(backend.isPdfMode());
+        QCOMPARE(backend.imageCount(), 3);
+        QCOMPARE(backend.imageIndex(), 0);
+        QCOMPARE(backend.pageRangeMode(), QString("all"));
+        QCOMPARE(backend.previewPageCount(), 3);
+        QVERIFY(backend.metadata().value("isPdf").toBool());
+        QCOMPARE(backend.metadata().value("pdfPageCount").toInt(), 3);
+        QVERIFY(!backend.thumbnailForIndex(1).isNull());
+
+        // Rotate page 1 (index 0) and verify edit persists when switching pages.
+        backend.rotateRight();
+        QCOMPARE(backend.rotation(), 90);
+        backend.nextImage();
+        QCOMPARE(backend.imageIndex(), 1);
+        QCOMPARE(backend.rotation(), 0);
+        backend.previousImage();
+        QCOMPARE(backend.rotation(), 90);
+
+        // Move page 1 down to position 2 (index 1) and verify it stays current.
+        QVERIFY(backend.moveCurrentPageDown());
+        QCOMPARE(backend.imageIndex(), 1);
+        QVERIFY(backend.hasDocumentChanges());
+        QVERIFY(backend.hasUnsavedEdits());
+
+        // Delete page 3 (index 2) -> 2 pages left.
+        QVERIFY(backend.deletePage(2));
+        QCOMPARE(backend.imageCount(), 2);
+
+        // Merge pdfB -> 3 pages total.
+        QVERIFY(backend.appendFiles({pdfB}));
+        QCOMPARE(backend.imageCount(), 3);
+
+        // Print page range "1, 3" -> 2 preview pages at 1-up, 1 preview page at 2-up.
+        backend.setPageRangeMode("range");
+        backend.setPageRangeText("1, 3");
+        QVERIFY(backend.pageRangeValid());
+        QCOMPARE(backend.activePageCount(), 2);
+        QCOMPARE(backend.previewPageCount(), 2);
+
+        backend.setPerPage(2);
+        QCOMPARE(backend.previewPageCount(), 1);
+        backend.setPerPage(1);
+
+        // Invalid range is rejected cleanly.
+        backend.setPageRangeText("1-9");
+        QVERIFY(!backend.pageRangeValid());
+        QVERIFY(!backend.savePdfTo(dir.filePath("bad.pdf")));
+
+        // Save organized all pages to a new PDF and confirm originals are untouched.
+        backend.setPageRangeMode("all");
+        const QString savedMerged = dir.filePath("organized.pdf");
+        QVERIFY(backend.savePdfTo(savedMerged));
+        QCOMPARE(PdfDocument::pageCount(savedMerged), 3);
+        QVERIFY(!backend.hasDocumentChanges());
+        QCOMPARE(readFile(pdfA), origPdfABytes);
+
+        // CLI: inspect PDF & export merged PDFs with --pages.
+        QStringList guiFiles;
+        const auto inspectCode = Cli::run({"peek", "inspect", pdfA, "--json"}, guiFiles);
+        QVERIFY(inspectCode.has_value());
+        QCOMPARE(*inspectCode, 0);
+
+        const QString cliMerged = dir.filePath("cli_slice.pdf");
+        const auto mergeCode = Cli::run({"peek", "export", pdfA, pdfB, "--pages", "1,4", "-o", cliMerged, "--json"}, guiFiles);
+        QVERIFY(mergeCode.has_value());
+        QCOMPARE(*mergeCode, 0);
+        QCOMPARE(PdfDocument::pageCount(cliMerged), 2);
     }
 
     void themeFallsBack() {

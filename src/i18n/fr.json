@@ -45,8 +45,14 @@
   "Print Selection": "Imprimer la sélection",
   "All": "Tout",
   "Clear": "Effacer",
-  "%n images": { "one": "%n image", "other": "%n images" },
-  "%n selected": { "one": "%n sélectionnée", "other": "%n sélectionnées" },
+  "%n images": {
+    "one": "%n image",
+    "other": "%n images"
+  },
+  "%n selected": {
+    "one": "%n sélectionnée",
+    "other": "%n sélectionnées"
+  },
   "Adjust Size": "Ajuster la taille",
   "Adjust Color": "Ajuster la couleur",
   "Exposure": "Exposition",
@@ -86,5 +92,50 @@
   "Redact (Blackout)": "Masquer",
   "Custom…": "Personnalisé…",
   "Manage Custom Sizes…": "Gérer les tailles personnalisées…",
-  "Save Size": "Enregistrer le format"
+  "Save Size": "Enregistrer le format",
+  "Drop an image or PDF to preview & print": "Déposez une image ou un PDF pour prévisualiser et imprimer",
+  "Open Image or PDF": "Ouvrir une image ou un PDF",
+  "Images & PDFs": "Images et PDF",
+  "Merge PDF or Images": "Fusionner des PDF ou images",
+  "+ Merge": "+ Fusionner",
+  "%n pages": {
+    "one": "%n page",
+    "other": "%n pages"
+  },
+  "Added %n pages": {
+    "one": "%n page ajoutée",
+    "other": "%n pages ajoutées"
+  },
+  "Page %1": "Page %1",
+  "Page": "Page",
+  "Pages": "Pages",
+  "Pages per Sheet": "Pages par feuille",
+  "All (%1)": "Toutes (%1)",
+  "Current": "Actuelle",
+  "Repeat": "Répéter",
+  "Range": "Plage",
+  "e.g. 1-3, 5": "ex. 1-3, 5",
+  "Invalid range": "Plage invalide",
+  "Invalid page range. Use numbers like 1-3, 5.": "Plage de pages invalide. Utilisez des nombres comme 1-3, 5.",
+  "Page Size": "Format de page",
+  "%1 / %2": "%1 / %2",
+  "PDF Document": "Document PDF",
+  "No PDF document metadata.": "Aucune métadonnée PDF.",
+  "Title": "Titre",
+  "Author": "Auteur",
+  "Creator": "Créateur",
+  "Producer": "Producteur",
+  "Move Page Up / Down": "Déplacer la page vers le haut / bas",
+  "Merge PDF / Remove Page": "Fusionner PDF / Supprimer la page",
+  "Toggle Inspector (EXIF / PDF)": "Afficher/masquer l’inspecteur (EXIF / PDF)",
+  "Removed page (original file unchanged)": "Page supprimée (fichier d’origine inchangé)",
+  "No supported image or PDF files found.": "Aucun fichier image ou PDF pris en charge trouvé.",
+  "No supported image or PDF files to merge.": "Aucun fichier image ou PDF pris en charge à fusionner.",
+  "PDF file not found: %1": "Fichier PDF introuvable : %1",
+  "Could not open PDF: %1": "Impossible d’ouvrir le PDF : %1",
+  "PDF is password-protected: %1": "Le PDF est protégé par mot de passe : %1",
+  "PDF page %1 is out of range.": "La page PDF %1 est hors limites.",
+  "Could not load PDF page %1.": "Impossible de charger la page PDF %1.",
+  "Could not render PDF page %1.": "Impossible de rendre la page PDF %1.",
+  "Could not render page %1 of %2": "Impossible de rendre la page %1 de %2"
 }

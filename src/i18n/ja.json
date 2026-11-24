@@ -44,8 +44,12 @@
   "Print Selection": "選択範囲を印刷",
   "All": "すべて",
   "Clear": "解除",
-  "%n images": { "other": "%n 枚の画像" },
-  "%n selected": { "other": "%n 枚選択中" },
+  "%n images": {
+    "other": "%n 枚の画像"
+  },
+  "%n selected": {
+    "other": "%n 枚選択中"
+  },
   "Adjust Size": "サイズを調整",
   "Adjust Color": "カラーを調整",
   "Exposure": "露出",
@@ -85,5 +89,48 @@
   "Redact (Blackout)": "墨消し",
   "Custom…": "カスタム…",
   "Manage Custom Sizes…": "カスタムサイズを管理…",
-  "Save Size": "サイズを保存"
+  "Save Size": "サイズを保存",
+  "Drop an image or PDF to preview & print": "画像またはPDFをドロップしてプレビュー・印刷",
+  "Open Image or PDF": "画像またはPDFを開く",
+  "Images & PDFs": "画像とPDF",
+  "Merge PDF or Images": "PDFまたは画像を結合",
+  "+ Merge": "+ 結合",
+  "%n pages": {
+    "other": "%n ページ"
+  },
+  "Added %n pages": {
+    "other": "%n ページを追加しました"
+  },
+  "Page %1": "ページ %1",
+  "Page": "ページ",
+  "Pages": "ページ範囲",
+  "Pages per Sheet": "1枚あたりのページ数",
+  "All (%1)": "すべて (%1)",
+  "Current": "現在",
+  "Repeat": "繰り返し",
+  "Range": "範囲指定",
+  "e.g. 1-3, 5": "例: 1-3, 5",
+  "Invalid range": "範囲が無効です",
+  "Invalid page range. Use numbers like 1-3, 5.": "ページ範囲が無効です。1-3, 5 のように入力してください。",
+  "Page Size": "ページサイズ",
+  "%1 / %2": "%1 / %2",
+  "PDF Document": "PDFドキュメント",
+  "No PDF document metadata.": "PDFメタデータはありません。",
+  "Title": "タイトル",
+  "Author": "作成者",
+  "Creator": "作成アプリ",
+  "Producer": "PDF変換",
+  "Move Page Up / Down": "ページを上 / 下へ移動",
+  "Merge PDF / Remove Page": "PDF結合 / ページ削除",
+  "Toggle Inspector (EXIF / PDF)": "インスペクタ表示切替 (EXIF / PDF)",
+  "Removed page (original file unchanged)": "ページを削除しました（元ファイルは変更されません）",
+  "No supported image or PDF files found.": "対応する画像またはPDFファイルが見つかりません。",
+  "No supported image or PDF files to merge.": "結合できる画像またはPDFファイルがありません。",
+  "PDF file not found: %1": "PDFファイルが見つかりません: %1",
+  "Could not open PDF: %1": "PDFを開けません: %1",
+  "PDF is password-protected: %1": "PDFはパスワードで保護されています: %1",
+  "PDF page %1 is out of range.": "PDFページ %1 は範囲外です。",
+  "Could not load PDF page %1.": "PDFページ %1 を読み込めません。",
+  "Could not render PDF page %1.": "PDFページ %1 を描画できません。",
+  "Could not render page %1 of %2": "%2 の %1 ページを描画できません"
 }

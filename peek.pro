@@ -1,6 +1,7 @@
 QT += core gui qml quick quickcontrols2 dbus
 
-CONFIG += c++17 release
+CONFIG += c++17 release link_pkgconfig
+PKGCONFIG += poppler-qt6
 TARGET = peek
 TEMPLATE = app
 
@@ -11,6 +12,7 @@ HEADERS += \
     src/imageops.h \
     src/inspector.h \
     src/markup.h \
+    src/pdfdocument.h \
     src/portalfilepicker.h \
     src/presetstore.h \
     src/printrenderer.h \
@@ -24,6 +26,7 @@ SOURCES += \
     src/inspector.cpp \
     src/main.cpp \
     src/markup.cpp \
+    src/pdfdocument.cpp \
     src/portalfilepicker.cpp \
     src/presetstore.cpp \
     src/printrenderer.cpp \

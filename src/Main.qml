@@ -30,12 +30,14 @@ ApplicationWindow {
     property bool exportVisible: false
     property bool quitConfirmVisible: false
     property bool sidebarVisible: false
+    property bool lastPdfMode: false
+    property string lastDocPath: ""
     property bool selectMode: false
     property string aspectPreset: "free" // free | 1:1 | 4:3 | 3:2 | 16:9 | a4
     property bool showCheckerboard: false
 
     readonly property bool modalOpen: helpVisible || printVisible || resizeVisible || exportVisible || quitConfirmVisible
-    readonly property bool typingText: textCalloutOpen || printSheet.savingPreset || printSheet.editingCustomPaper || resizeVisible
+    readonly property bool typingText: textCalloutOpen || printSheet.savingPreset || printSheet.editingCustomPaper || printSheet.editingPageRange || resizeVisible
 
     // Viewer zoom/pan state.
     property string zoomMode: "fit"
@@ -155,6 +157,13 @@ ApplicationWindow {
                 win.panY = 0
             }
         }
+        function onFilesChanged() {
+            if (backend.isPdfMode && backend.imageCount > 1 && (!win.lastPdfMode || win.lastDocPath !== backend.filePath)) {
+                win.sidebarVisible = true
+            }
+            win.lastPdfMode = backend.isPdfMode
+            win.lastDocPath = backend.filePath
+        }
     }
 
     Timer {
@@ -197,17 +206,21 @@ ApplicationWindow {
     }
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.modalOpen && !win.typingText; onActivated: win.openPrintSheet() }
     Shortcut { sequences: [StandardKey.Print, "P"]; context: Qt.ApplicationShortcut; enabled: !win.helpVisible && !win.resizeVisible && !win.exportVisible && !win.typingText; onActivated: { if (win.printVisible) win.printVisible = false; else win.openPrintSheet() } }
-    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && !printSheet.savingPreset && !printSheet.editingCustomPaper && !backend.printBusy && backend.printer.length > 0; onActivated: { backend.printCurrent(); win.printVisible = false } }
+    Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && !printSheet.savingPreset && !printSheet.editingCustomPaper && !printSheet.editingPageRange && backend.pageRangeValid && !backend.printBusy && backend.printer.length > 0; onActivated: { backend.printCurrent(); win.printVisible = false } }
     Shortcut { sequences: [StandardKey.Open, "O"]; context: Qt.ApplicationShortcut; enabled: !win.modalOpen && !win.typingText; onActivated: backend.openFileDialog() }
     Shortcut { sequences: [StandardKey.Save]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.helpVisible && !win.resizeVisible; onActivated: backend.savePdfDialog() }
     Shortcut { sequences: ["Ctrl+Shift+S", "E"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: win.openExportSheet() }
     Shortcut { sequence: "Ctrl+Shift+R"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.closeAllModals(); win.resizeVisible = true } }
     Shortcut { sequence: "Ctrl+Shift+C"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.inspectorVisible = false; win.colorVisible = !win.colorVisible } }
+    Shortcut { sequence: "Ctrl+Shift+M"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: backend.appendFilesDialog() }
+    Shortcut { sequence: "Ctrl+Up"; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen && !win.typingText; onActivated: backend.moveCurrentPageUp() }
+    Shortcut { sequence: "Ctrl+Down"; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen && !win.typingText; onActivated: backend.moveCurrentPageDown() }
+    Shortcut { sequence: "Delete"; context: Qt.ApplicationShortcut; enabled: backend.isPdfMode && backend.imageCount > 1 && !win.modalOpen && !win.typingText; onActivated: backend.deleteCurrentPage() }
     Shortcut { sequence: "M"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.selectMode = false; win.markupMode = !win.markupMode } }
     Shortcut { sequence: "I"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.colorVisible = false; win.inspectorVisible = !win.inspectorVisible } }
     Shortcut { sequence: "Ctrl+K"; context: Qt.ApplicationShortcut; enabled: backend.hasSelection && !win.modalOpen && !win.typingText; onActivated: { backend.cropToSelection(); win.selectMode = false; win.resetView() } }
     Shortcut { sequences: [StandardKey.Copy]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: backend.copyToClipboard() }
-    Shortcut { sequence: "Tab"; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen && !win.typingText; onActivated: win.sidebarVisible = !win.sidebarVisible }
+    Shortcut { sequence: "Tab"; context: Qt.ApplicationShortcut; enabled: (backend.imageCount > 1 || backend.isPdfMode) && !win.modalOpen && !win.typingText; onActivated: win.sidebarVisible = !win.sidebarVisible }
     Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.markupMode = false; win.selectMode = !win.selectMode } }
     Shortcut { sequences: [StandardKey.SelectAll]; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen && !win.typingText; onActivated: { win.sidebarVisible = true; backend.selectAllFiles() } }
     Shortcut { sequences: ["PgDown"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && backend.previewPageCount > 1; onActivated: backend.nextPreviewPage() }
@@ -244,7 +257,7 @@ ApplicationWindow {
                 spacing: 0
 
                 ThumbnailSidebar {
-                    visible: win.sidebarVisible && backend.imageCount > 1
+                    visible: win.sidebarVisible && (backend.imageCount > 1 || backend.isPdfMode)
                     Layout.preferredWidth: 180
                     Layout.fillHeight: true
                     onImagePicked: win.resetView()
@@ -316,7 +329,7 @@ ApplicationWindow {
                                 Text {
                                     Layout.fillWidth: true
                                     horizontalAlignment: Text.AlignHCenter
-                                    text: qsTr("Drop an image to preview & print")
+                                    text: qsTr("Drop an image or PDF to preview & print")
                                     color: "#f4f4f6"
                                     font.pixelSize: 16
                                     font.weight: Font.DemiBold
@@ -340,7 +353,7 @@ ApplicationWindow {
                                     leftPadding: 18
                                     rightPadding: 18
                                     Material.roundedScale: Math.min(4, theme.radius)
-                                    text: qsTr("Open Image")
+                                    text: qsTr("Open Image or PDF")
                                     contentItem: Text {
                                         text: emptyOpenBtn.text
                                         color: theme.accentForeground
@@ -925,7 +938,7 @@ ApplicationWindow {
                     spacing: 4
 
                     ToolButton {
-                        visible: backend.imageCount > 1
+                        visible: backend.imageCount > 1 || backend.isPdfMode
                         Material.roundedScale: Math.min(4, theme.radius)
                         implicitWidth: 34
                         implicitHeight: 34

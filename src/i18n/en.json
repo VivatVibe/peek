@@ -7,6 +7,14 @@
     "one": "%n image",
     "other": "%n images"
   },
+  "%n pages": {
+    "one": "%n page",
+    "other": "%n pages"
+  },
+  "Added %n pages": {
+    "one": "Added %n page",
+    "other": "Added %n pages"
+  },
   "%n selected": {
     "one": "%n selected",
     "other": "%n selected"
