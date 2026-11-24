@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Name=Peek
+Name[th]=Peek
+Name[da]=Peek
+Name[ar]=Peek
+Name[de]=Peek
+Name[fr]=Peek
+Name[ja]=Peek
+Comment=Preview images and print them effortlessly
+Comment[th]=ดูตัวอย่างรูปภาพและสั่งพิมพ์ได้ง่ายเหมือน Preview
+Comment[da]=Vis billeder og udskriv dem nemt
+Comment[ar]=معاينة الصور وطباعتها بسهولة
+Comment[de]=Bilder anzeigen und einfach drucken
+Comment[fr]=Afficher et imprimer vos images facilement
+Comment[ja]=画像をプレビューして簡単に印刷
+Exec=peek %F
+Icon=peek
+Terminal=false
+Categories=Graphics;Viewer;Utility;
+MimeType=image/png;image/jpeg;image/webp;image/bmp;image/gif;image/tiff;image/svg+xml;
+StartupWMClass=peek

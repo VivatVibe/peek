@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#FFD60A"/>
+  <!-- Photo frame -->
+  <rect x="13" y="14" width="38" height="27" rx="3" fill="#121216"/>
+  <path d="M18 36 L27 25 L34 32 L39 27 L46 36 Z" fill="#FFD60A"/>
+  <circle cx="42" cy="21" r="2.8" fill="#FFD60A"/>
+  <!-- Printed sheet emerging below -->
+  <rect x="20" y="43" width="24" height="9" rx="2" fill="#121216"/>
+  <rect x="24" y="46" width="16" height="2.4" rx="1.2" fill="#FFD60A"/>
+</svg>

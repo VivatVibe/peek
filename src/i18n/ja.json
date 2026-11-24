@@ -1,0 +1,33 @@
+{
+  "Drop an image to preview & print": "画像をドロップしてプレビュー・印刷",
+  "Press O to choose a file, or ? for keyboard shortcuts": "Oキーでファイルを選択、?キーでショートカットを表示",
+  "Open Image": "画像を開く",
+  "Open": "開く",
+  "Print": "印刷",
+  "Landscape": "横向き",
+  "Portrait": "縦向き",
+  "%n copies": {
+    "other": "%n 部"
+  },
+  "Printer": "プリンター",
+  "Refresh": "更新",
+  "Copies": "部数",
+  "Paper Size": "用紙サイズ",
+  "Orientation": "向き",
+  "Auto": "自動",
+  "Scale": "拡大縮小",
+  "Fit Page": "ページに合わせる",
+  "Fill Paper": "用紙いっぱいに",
+  "Custom": "カスタム",
+  "Margins": "余白",
+  "Standard": "標準",
+  "Narrow": "狭い",
+  "Borderless": "フチなし",
+  "Color": "カラー",
+  "Black & White": "白黒",
+  "Save as PDF": "PDFとして保存",
+  "Cancel": "キャンセル",
+  "Printing…": "印刷中…",
+  "Keyboard Shortcuts": "キーボードショートカット",
+  "Quit": "終了"
+}
