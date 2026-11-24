@@ -22,4 +22,12 @@ public:
                          const QString &currentFolder,
                          std::function<void(const QString &path)> onSelected,
                          std::function<void(const QString &error)> onError) = 0;
+
+    virtual void saveFile(const QString &title,
+                          const QString &suggestedName,
+                          const QString &currentFolder,
+                          const QString &filterLabel,
+                          const QString &mimeType,
+                          std::function<void(const QString &path)> onSelected,
+                          std::function<void(const QString &error)> onError) = 0;
 };

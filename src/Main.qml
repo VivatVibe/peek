@@ -5,12 +5,12 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: win
-    width: 1040
+    width: 1060
     height: 700
-    minimumWidth: 720
+    minimumWidth: 740
     minimumHeight: 500
     visible: true
-    title: backend.hasImage ? backend.fileName + " — Peek" : "Peek"
+    title: backend.hasImage ? (backend.hasUnsavedEdits ? "• " : "") + backend.fileName + " — Peek" : "Peek"
     color: "#0e0e10"
 
     Material.theme: Material.Dark
@@ -19,18 +19,24 @@ ApplicationWindow {
 
     property bool helpVisible: false
     property bool printVisible: false
+    property bool resizeVisible: false
+    property bool colorVisible: false
+    property bool exportVisible: false
+    property bool quitConfirmVisible: false
     property bool sidebarVisible: false
     property bool selectMode: false
+    property string aspectPreset: "free" // free | 1:1 | 4:3 | 3:2 | 16:9 | a4
     property bool showCheckerboard: false
 
-    // Viewer zoom/pan state: zoomMode "fit" tracks the canvas automatically;
-    // "manual" uses zoomScale and panX/panY.
+    readonly property bool modalOpen: helpVisible || printVisible || resizeVisible || exportVisible || quitConfirmVisible
+
+    // Viewer zoom/pan state.
     property string zoomMode: "fit"
     property real zoomScale: 1.0
     property real panX: 0
     property real panY: 0
 
-    // Live rubber-band state while dragging a print selection marquee.
+    // Live rubber-band state while dragging a selection marquee.
     property bool draggingSelection: false
     property real dragStartNormX: 0
     property real dragStartNormY: 0
@@ -52,6 +58,25 @@ ApplicationWindow {
     readonly property real activeSelY: draggingSelection ? Math.min(dragStartNormY, dragCurNormY) : backend.selectionNorm.y
     readonly property real activeSelW: draggingSelection ? Math.abs(dragCurNormX - dragStartNormX) : backend.selectionNorm.width
     readonly property real activeSelH: draggingSelection ? Math.abs(dragCurNormY - dragStartNormY) : backend.selectionNorm.height
+
+    function aspectRatioValue(preset) {
+        switch (preset) {
+        case "1:1": return 1.0
+        case "4:3": return 4.0 / 3.0
+        case "3:2": return 3.0 / 2.0
+        case "16:9": return 16.0 / 9.0
+        case "a4": return 210.0 / 297.0
+        default: return 0.0
+        }
+    }
+
+    function closeAllModals() {
+        helpVisible = false
+        printVisible = false
+        resizeVisible = false
+        exportVisible = false
+        quitConfirmVisible = false
+    }
 
     function resetView() {
         zoomMode = "fit"
@@ -92,9 +117,27 @@ ApplicationWindow {
             backend.openFileDialog()
             return
         }
-        helpVisible = false
+        closeAllModals()
         backend.preparePrintSheet()
         printVisible = true
+    }
+
+    function openExportSheet() {
+        if (!backend.hasImage)
+            return
+        closeAllModals()
+        backend.refreshExportEstimate()
+        exportVisible = true
+    }
+
+    function requestQuit() {
+        backend.commitColorEdit()
+        if (backend.hasUnsavedEdits) {
+            closeAllModals()
+            quitConfirmVisible = true
+        } else {
+            Qt.quit()
+        }
     }
 
     Connections {
@@ -107,7 +150,6 @@ ApplicationWindow {
         }
     }
 
-    // Auto-hide success status banner after 4 seconds; errors stay until dismissed.
     Timer {
         id: statusTimer
         interval: 4000
@@ -128,42 +170,47 @@ ApplicationWindow {
     }
 
     // Keyboard shortcuts.
-    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: { win.printVisible = false; win.helpVisible = !win.helpVisible } }
-    Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
+    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: { const next = !win.helpVisible; win.closeAllModals(); win.helpVisible = next } }
+    Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !win.resizeVisible; onActivated: win.requestQuit() }
     Shortcut {
         sequence: "Escape"
         context: Qt.ApplicationShortcut
         onActivated: {
-            if (win.helpVisible) win.helpVisible = false
-            else if (win.printVisible) win.printVisible = false
+            if (win.modalOpen) win.closeAllModals()
+            else if (win.colorVisible) { backend.commitColorEdit(); win.colorVisible = false }
             else if (backend.hasSelection) { backend.clearSelection(); win.selectMode = false }
             else if (win.selectMode) win.selectMode = false
             else if (backend.errorMessage.length > 0) backend.clearMessages()
         }
     }
-    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.printVisible && !win.helpVisible; onActivated: win.openPrintSheet() }
-    Shortcut { sequences: [StandardKey.Print, "P"]; context: Qt.ApplicationShortcut; enabled: !win.helpVisible; onActivated: { if (win.printVisible) win.printVisible = false; else win.openPrintSheet() } }
+    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.modalOpen; onActivated: win.openPrintSheet() }
+    Shortcut { sequences: [StandardKey.Print, "P"]; context: Qt.ApplicationShortcut; enabled: !win.helpVisible && !win.resizeVisible && !win.exportVisible; onActivated: { if (win.printVisible) win.printVisible = false; else win.openPrintSheet() } }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && !backend.printBusy && backend.printer.length > 0; onActivated: { backend.printCurrent(); win.printVisible = false } }
-    Shortcut { sequences: [StandardKey.Open, "O"]; context: Qt.ApplicationShortcut; enabled: !win.printVisible && !win.helpVisible; onActivated: backend.openFileDialog() }
-    Shortcut { sequences: [StandardKey.Save]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.helpVisible; onActivated: backend.savePdfDialog() }
-    Shortcut { sequence: "Tab"; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.printVisible && !win.helpVisible; onActivated: win.sidebarVisible = !win.sidebarVisible }
-    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: win.selectMode = !win.selectMode }
-    Shortcut { sequences: [StandardKey.SelectAll]; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.printVisible && !win.helpVisible; onActivated: { win.sidebarVisible = true; backend.selectAllFiles() } }
+    Shortcut { sequences: [StandardKey.Open, "O"]; context: Qt.ApplicationShortcut; enabled: !win.modalOpen; onActivated: backend.openFileDialog() }
+    Shortcut { sequences: [StandardKey.Save]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.helpVisible && !win.resizeVisible; onActivated: backend.savePdfDialog() }
+    Shortcut { sequences: ["Ctrl+Shift+S", "E"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.openExportSheet() }
+    Shortcut { sequence: "Ctrl+Shift+R"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: { win.closeAllModals(); win.resizeVisible = true } }
+    Shortcut { sequence: "Ctrl+Shift+C"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.colorVisible = !win.colorVisible }
+    Shortcut { sequence: "Ctrl+K"; context: Qt.ApplicationShortcut; enabled: backend.hasSelection && !win.modalOpen; onActivated: { backend.cropToSelection(); win.selectMode = false; win.resetView() } }
+    Shortcut { sequences: [StandardKey.Copy]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: backend.copyToClipboard() }
+    Shortcut { sequence: "Tab"; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen; onActivated: win.sidebarVisible = !win.sidebarVisible }
+    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.selectMode = !win.selectMode }
+    Shortcut { sequences: [StandardKey.SelectAll]; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen; onActivated: { win.sidebarVisible = true; backend.selectAllFiles() } }
     Shortcut { sequences: ["PgDown"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && backend.previewPageCount > 1; onActivated: backend.nextPreviewPage() }
     Shortcut { sequences: ["PgUp"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && backend.previewPageCount > 1; onActivated: backend.previousPreviewPage() }
-    Shortcut { sequences: ["Right", "L"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: { win.resetView(); backend.nextImage() } }
-    Shortcut { sequences: ["Left", "H"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: { win.resetView(); backend.previousImage() } }
-    Shortcut { sequences: ["+", "="]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: win.zoomBy(1.25) }
-    Shortcut { sequence: "-"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: win.zoomBy(0.8) }
-    Shortcut { sequences: ["0", "F"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: win.resetView() }
-    Shortcut { sequence: "1"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: win.setActualSize() }
-    Shortcut { sequences: ["[", "Ctrl+L"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.helpVisible; onActivated: backend.rotateLeft() }
-    Shortcut { sequences: ["]", "Ctrl+R"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.helpVisible; onActivated: backend.rotateRight() }
-    Shortcut { sequence: "Shift+H"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.helpVisible; onActivated: backend.toggleFlipHorizontal() }
-    Shortcut { sequence: "Shift+V"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.helpVisible; onActivated: backend.toggleFlipVertical() }
-    Shortcut { sequences: [StandardKey.Undo]; context: Qt.ApplicationShortcut; enabled: backend.canUndo && !win.helpVisible; onActivated: backend.undo() }
-    Shortcut { sequences: [StandardKey.Redo]; context: Qt.ApplicationShortcut; enabled: backend.canRedo && !win.helpVisible; onActivated: backend.redo() }
-    Shortcut { sequence: "T"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.printVisible && !win.helpVisible; onActivated: win.showCheckerboard = !win.showCheckerboard }
+    Shortcut { sequences: ["Right", "L"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: { win.resetView(); backend.nextImage() } }
+    Shortcut { sequences: ["Left", "H"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: { win.resetView(); backend.previousImage() } }
+    Shortcut { sequences: ["+", "="]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.zoomBy(1.25) }
+    Shortcut { sequence: "-"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.zoomBy(0.8) }
+    Shortcut { sequences: ["0", "F"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.resetView() }
+    Shortcut { sequence: "1"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.setActualSize() }
+    Shortcut { sequences: ["[", "Ctrl+L"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: backend.rotateLeft() }
+    Shortcut { sequences: ["]", "Ctrl+R"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: backend.rotateRight() }
+    Shortcut { sequence: "Shift+H"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: backend.toggleFlipHorizontal() }
+    Shortcut { sequence: "Shift+V"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: backend.toggleFlipVertical() }
+    Shortcut { sequences: [StandardKey.Undo]; context: Qt.ApplicationShortcut; enabled: backend.canUndo && !win.modalOpen; onActivated: backend.undo() }
+    Shortcut { sequences: [StandardKey.Redo]; context: Qt.ApplicationShortcut; enabled: backend.canRedo && !win.modalOpen; onActivated: backend.redo() }
+    Shortcut { sequence: "T"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.showCheckerboard = !win.showCheckerboard }
 
     // Right-to-left languages mirror the window; Translator sets layoutDirection.
     Item {
@@ -304,7 +351,6 @@ ApplicationWindow {
                         anchors.fill: parent
                         visible: backend.hasImage
 
-                        // Optional checkerboard behind transparent images.
                         Canvas {
                             visible: win.showCheckerboard
                             x: imageFrame.x
@@ -341,8 +387,6 @@ ApplicationWindow {
                             fillMode: Image.Stretch
                         }
 
-                        // Pan, double-click zoom toggle, wheel zoom toward pointer,
-                        // and rectangular region selection (Select mode or Shift+Drag).
                         MouseArea {
                             id: panArea
                             anchors.fill: parent
@@ -381,8 +425,17 @@ ApplicationWindow {
                                 if (!pressed || !backend.hasImage)
                                     return
                                 if (isSelectingDrag) {
-                                    win.dragCurNormX = toImageNormX(mouse.x)
-                                    win.dragCurNormY = toImageNormY(mouse.y)
+                                    let nx = toImageNormX(mouse.x)
+                                    let ny = toImageNormY(mouse.y)
+                                    const ratio = win.aspectRatioValue(win.aspectPreset)
+                                    if (ratio > 0.0 && backend.imageWidth > 0 && backend.imageHeight > 0) {
+                                        const dxPx = (nx - win.dragStartNormX) * backend.imageWidth
+                                        const dySign = ny >= win.dragStartNormY ? 1.0 : -1.0
+                                        const dyPx = Math.abs(dxPx) / ratio * dySign
+                                        ny = Math.max(0.0, Math.min(1.0, win.dragStartNormY + dyPx / backend.imageHeight))
+                                    }
+                                    win.dragCurNormX = nx
+                                    win.dragCurNormY = ny
                                 } else {
                                     win.zoomMode = "manual"
                                     win.zoomScale = win.effectiveScale
@@ -433,7 +486,6 @@ ApplicationWindow {
                             readonly property real sw: win.activeSelW * width
                             readonly property real sh: win.activeSelH * height
 
-                            // Four outer scrims around the selected box.
                             Rectangle { x: 0; y: 0; width: parent.width; height: parent.sy; color: "#88000000" }
                             Rectangle { x: 0; y: parent.sy + parent.sh; width: parent.width; height: Math.max(0, parent.height - parent.sy - parent.sh); color: "#88000000" }
                             Rectangle { x: 0; y: parent.sy; width: parent.sx; height: parent.sh; color: "#88000000" }
@@ -450,7 +502,71 @@ ApplicationWindow {
                             }
                         }
 
-                        // Compact floating action bar for an active print selection.
+                        // Aspect-ratio strip when Select/Crop mode is active.
+                        Rectangle {
+                            visible: win.selectMode && !win.modalOpen
+                            anchors.top: parent.top
+                            anchors.topMargin: 12
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: aspectRow.implicitWidth + 16
+                            height: 32
+                            radius: Math.min(4, theme.radius)
+                            color: "#e618181f"
+                            border.color: "#32323c"
+                            border.width: 1
+
+                            RowLayout {
+                                id: aspectRow
+                                anchors.centerIn: parent
+                                spacing: 4
+
+                                Text {
+                                    text: qsTr("Ratio:")
+                                    color: "#8e8e9a"
+                                    font.pixelSize: 11
+                                    Layout.rightMargin: 2
+                                }
+
+                                Repeater {
+                                    model: [
+                                        { value: "free", label: qsTr("Free") },
+                                        { value: "1:1", label: "1:1" },
+                                        { value: "4:3", label: "4:3" },
+                                        { value: "3:2", label: "3:2" },
+                                        { value: "16:9", label: "16:9" },
+                                        { value: "a4", label: "A4" }
+                                    ]
+
+                                    Rectangle {
+                                        required property var modelData
+                                        readonly property bool active: win.aspectPreset === modelData.value
+                                        implicitWidth: ratioLbl.implicitWidth + 12
+                                        implicitHeight: 22
+                                        radius: Math.min(4, theme.radius)
+                                        color: active ? theme.accent : (rMa.containsMouse ? "#262630" : "transparent")
+
+                                        Text {
+                                            id: ratioLbl
+                                            anchors.centerIn: parent
+                                            text: modelData.label
+                                            color: active ? theme.accentForeground : "#d4d4de"
+                                            font.pixelSize: 11
+                                            font.weight: active ? Font.DemiBold : Font.Normal
+                                        }
+
+                                        MouseArea {
+                                            id: rMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: win.aspectPreset = modelData.value
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Floating action bar for an active selection: Crop, Copy, Print Selection.
                         Rectangle {
                             visible: backend.hasSelection && !win.draggingSelection
                             anchors.bottom: parent.bottom
@@ -473,17 +589,45 @@ ApplicationWindow {
                                         void translator.language
                                         const w = Number(backend.selectionPixelWidth).toLocaleString(Qt.locale(), 'f', 0)
                                         const h = Number(backend.selectionPixelHeight).toLocaleString(Qt.locale(), 'f', 0)
-                                        return qsTr("Selection: %1 × %2").arg(w).arg(h)
+                                        return qsTr("%1 × %2").arg(w).arg(h)
                                     }
-                                    color: "#f0f0f6"
+                                    color: "#a4a4b0"
                                     font.pixelSize: 12
                                 }
 
                                 Text {
-                                    text: qsTr("Print Selection")
+                                    text: qsTr("Crop")
                                     color: theme.accent
                                     font.pixelSize: 12
                                     font.weight: Font.DemiBold
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            backend.cropToSelection()
+                                            win.selectMode = false
+                                            win.resetView()
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    text: qsTr("Copy")
+                                    color: "#e4e4ec"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.copyToClipboard()
+                                    }
+                                }
+
+                                Text {
+                                    text: qsTr("Print Selection")
+                                    color: "#e4e4ec"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
                                     MouseArea {
                                         anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
@@ -507,7 +651,16 @@ ApplicationWindow {
                             }
                         }
 
-                        // Subtle previous / next navigation buttons for folders with multiple images.
+                        // Floating Adjust Color HUD on right edge of canvas.
+                        ColorSheet {
+                            visible: win.colorVisible && backend.hasImage && !win.modalOpen
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            anchors.margins: 14
+                            onCloseRequested: win.colorVisible = false
+                        }
+
+                        // Subtle previous / next navigation buttons.
                         Rectangle {
                             visible: backend.imageCount > 1 && !win.selectMode && (pointerTracker.hovered || prevMa.containsMouse)
                             anchors.left: parent.left
@@ -537,7 +690,7 @@ ApplicationWindow {
                         }
 
                         Rectangle {
-                            visible: backend.imageCount > 1 && !win.selectMode && (pointerTracker.hovered || nextMa.containsMouse)
+                            visible: backend.imageCount > 1 && !win.selectMode && !win.colorVisible && (pointerTracker.hovered || nextMa.containsMouse)
                             anchors.right: parent.right
                             anchors.rightMargin: 16
                             anchors.verticalCenter: parent.verticalCenter
@@ -565,7 +718,6 @@ ApplicationWindow {
                         }
                     }
 
-                    // Drag-and-drop overlay anywhere over the canvas.
                     DropArea {
                         id: dropArea
                         anchors.fill: parent
@@ -577,14 +729,14 @@ ApplicationWindow {
                         }
                     }
 
-                    // Status / error banner floating at top center.
+                    // Status / error toast banner.
                     Rectangle {
                         id: toast
                         readonly property bool isError: backend.errorMessage.length > 0
                         readonly property string messageText: isError ? backend.errorMessage : backend.statusMessage
                         visible: messageText.length > 0
                         anchors.top: parent.top
-                        anchors.topMargin: 14
+                        anchors.topMargin: win.selectMode ? 52 : 14
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: Math.min(parent.width - 40, toastRow.implicitWidth + 28)
                         height: 38
@@ -636,16 +788,15 @@ ApplicationWindow {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 14
-                    spacing: 6
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 12
+                    spacing: 4
 
-                    // Sidebar toggle when multiple images exist.
                     ToolButton {
                         visible: backend.imageCount > 1
                         Material.roundedScale: Math.min(4, theme.radius)
-                        implicitWidth: 36
-                        implicitHeight: 36
+                        implicitWidth: 34
+                        implicitHeight: 34
                         text: "▤"
                         font.pixelSize: 15
                         highlighted: win.sidebarVisible
@@ -655,7 +806,6 @@ ApplicationWindow {
                         onClicked: win.sidebarVisible = !win.sidebarVisible
                     }
 
-                    // Left: Open + file metadata.
                     Button {
                         Material.roundedScale: Math.min(4, theme.radius)
                         flat: true
@@ -665,13 +815,13 @@ ApplicationWindow {
 
                     ColumnLayout {
                         Layout.fillWidth: true
-                        Layout.minimumWidth: 80
+                        Layout.minimumWidth: 70
                         spacing: 1
                         visible: backend.hasImage
 
                         Text {
                             Layout.fillWidth: true
-                            text: backend.fileName
+                            text: (backend.hasUnsavedEdits ? "• " : "") + backend.fileName
                             color: "#f0f0f4"
                             font.pixelSize: 13
                             font.weight: Font.Medium
@@ -702,28 +852,50 @@ ApplicationWindow {
                         visible: !backend.hasImage
                     }
 
-                    // Center: Select region, transform, and zoom controls.
+                    // Center: Edit, Transform & Zoom controls.
                     RowLayout {
                         visible: backend.hasImage
-                        spacing: 2
+                        spacing: 1
 
                         ToolButton {
                             Material.roundedScale: Math.min(4, theme.radius)
-                            implicitWidth: 36
-                            implicitHeight: 36
+                            implicitWidth: 34; implicitHeight: 34
                             text: "⬚"
-                            font.pixelSize: 16
+                            font.pixelSize: 15
                             highlighted: win.selectMode || backend.hasSelection
                             Material.accent: theme.accent
                             ToolTip.visible: hovered
-                            ToolTip.text: qsTr("Select Region to Print (S)")
+                            ToolTip.text: qsTr("Select / Crop (S)")
                             onClicked: win.selectMode = !win.selectMode
                         }
 
                         ToolButton {
                             Material.roundedScale: Math.min(4, theme.radius)
+                            implicitWidth: 34; implicitHeight: 34
+                            text: "⤢"
+                            font.pixelSize: 15
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Adjust Size (Ctrl+Shift+R)")
+                            onClicked: { win.closeAllModals(); win.resizeVisible = true }
+                        }
+
+                        ToolButton {
+                            Material.roundedScale: Math.min(4, theme.radius)
+                            implicitWidth: 34; implicitHeight: 34
+                            text: "◐"
+                            font.pixelSize: 15
+                            highlighted: win.colorVisible || backend.hasColorAdjustments
+                            Material.accent: theme.accent
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Adjust Color (Ctrl+Shift+C)")
+                            onClicked: win.colorVisible = !win.colorVisible
+                        }
+
+                        ToolButton {
+                            Material.roundedScale: Math.min(4, theme.radius)
+                            implicitWidth: 34; implicitHeight: 34
                             text: "↺"
-                            font.pixelSize: 16
+                            font.pixelSize: 15
                             ToolTip.visible: hovered
                             ToolTip.text: qsTr("Rotate Left ([)")
                             onClicked: backend.rotateLeft()
@@ -731,8 +903,9 @@ ApplicationWindow {
 
                         ToolButton {
                             Material.roundedScale: Math.min(4, theme.radius)
+                            implicitWidth: 34; implicitHeight: 34
                             text: "↻"
-                            font.pixelSize: 16
+                            font.pixelSize: 15
                             ToolTip.visible: hovered
                             ToolTip.text: qsTr("Rotate Right (])")
                             onClicked: backend.rotateRight()
@@ -740,8 +913,9 @@ ApplicationWindow {
 
                         ToolButton {
                             Material.roundedScale: Math.min(4, theme.radius)
+                            implicitWidth: 30; implicitHeight: 34
                             text: "−"
-                            font.pixelSize: 16
+                            font.pixelSize: 15
                             ToolTip.visible: hovered
                             ToolTip.text: qsTr("Zoom Out (−)")
                             onClicked: win.zoomBy(0.8)
@@ -750,7 +924,7 @@ ApplicationWindow {
                         Button {
                             Material.roundedScale: Math.min(4, theme.radius)
                             flat: true
-                            implicitWidth: 62
+                            implicitWidth: 56
                             text: {
                                 void translator.language
                                 const pct = Math.round(win.effectiveScale * 100)
@@ -763,21 +937,47 @@ ApplicationWindow {
 
                         ToolButton {
                             Material.roundedScale: Math.min(4, theme.radius)
+                            implicitWidth: 30; implicitHeight: 34
                             text: "+"
-                            font.pixelSize: 16
+                            font.pixelSize: 15
                             ToolTip.visible: hovered
                             ToolTip.text: qsTr("Zoom In (+)")
                             onClicked: win.zoomBy(1.25)
                         }
                     }
 
-                    // Right: Primary Print button + Help button.
+                    // Right: Export + Primary Print + Help.
+                    Button {
+                        id: toolbarExportBtn
+                        visible: backend.hasImage
+                        Material.roundedScale: Math.min(4, theme.radius)
+                        implicitHeight: 34
+                        leftPadding: 12
+                        rightPadding: 12
+                        text: qsTr("Export")
+                        contentItem: Text {
+                            text: toolbarExportBtn.text
+                            color: "#e2e2ec"
+                            font.pixelSize: 12
+                            font.weight: Font.Medium
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            radius: Math.min(4, theme.radius)
+                            color: toolbarExportBtn.hovered ? "#25252f" : "#1b1b22"
+                            border.color: "#32323c"
+                            border.width: 1
+                        }
+                        onClicked: win.openExportSheet()
+                    }
+
                     Button {
                         id: toolbarPrintBtn
                         Material.roundedScale: Math.min(4, theme.radius)
                         implicitHeight: 34
-                        leftPadding: 16
-                        rightPadding: 16
+                        leftPadding: 15
+                        rightPadding: 15
                         enabled: backend.hasImage
                         text: {
                             void translator.language
@@ -805,26 +1005,43 @@ ApplicationWindow {
 
                     ToolButton {
                         Material.roundedScale: Math.min(4, theme.radius)
+                        implicitWidth: 32; implicitHeight: 34
                         text: "?"
                         font.pixelSize: 14
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("Keyboard Shortcuts (?)")
                         onClicked: {
-                            win.printVisible = false
-                            win.helpVisible = !win.helpVisible
+                            const next = !win.helpVisible
+                            win.closeAllModals()
+                            win.helpVisible = next
                         }
                     }
                 }
             }
         }
 
-        // Print sheet modal.
         PrintSheet {
             visible: win.printVisible
             onCloseRequested: win.printVisible = false
         }
 
-        // Keyboard shortcuts overlay.
+        ResizeSheet {
+            visible: win.resizeVisible
+            onCloseRequested: win.resizeVisible = false
+        }
+
+        ExportSheet {
+            visible: win.exportVisible
+            onCloseRequested: win.exportVisible = false
+        }
+
+        QuitConfirmOverlay {
+            visible: win.quitConfirmVisible
+            onCancelRequested: win.quitConfirmVisible = false
+            onExportRequested: win.openExportSheet()
+            onDiscardQuitRequested: Qt.quit()
+        }
+
         HelpOverlay {
             visible: win.helpVisible
             onCloseRequested: win.helpVisible = false

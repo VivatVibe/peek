@@ -15,20 +15,20 @@ Item {
         { key: "Space / Ctrl+P", label: qsTr("Open Print Sheet") },
         { key: "Enter", label: qsTr("Print (inside Print Sheet)") },
         { key: "Ctrl+S", label: qsTr("Save as PDF") },
+        { key: "E / Ctrl+Shift+S", label: qsTr("Export / Convert Format") },
         { key: "O / Ctrl+O", label: qsTr("Open Image") },
         { key: "Tab", label: qsTr("Toggle Thumbnail Sidebar") },
-        { key: "S / Shift+Drag", label: qsTr("Select Region to Print") },
-        { key: "Ctrl+A", label: qsTr("Select All Images") },
+        { key: "S / Shift+Drag", label: qsTr("Select Region to Crop or Print") },
+        { key: "Ctrl+K", label: qsTr("Crop to Selection") },
+        { key: "Ctrl+C", label: qsTr("Copy Image or Selection") },
+        { key: "Ctrl+Shift+R", label: qsTr("Adjust Size (Resize)") },
+        { key: "Ctrl+Shift+C", label: qsTr("Adjust Color") },
         { key: "← / →", label: qsTr("Previous / Next Image") },
-        { key: "+ / −", label: qsTr("Zoom In / Out") },
-        { key: "0 / F", label: qsTr("Fit to Window") },
-        { key: "1", label: qsTr("Actual Size (100%)") },
+        { key: "+ / − / 0 / 1", label: qsTr("Zoom In / Out / Fit / 100%") },
         { key: "[ / ]", label: qsTr("Rotate Left / Right") },
         { key: "Shift+H / Shift+V", label: qsTr("Flip Horizontal / Vertical") },
         { key: "Ctrl+Z / Ctrl+Shift+Z", label: qsTr("Undo / Redo") },
-        { key: "T", label: qsTr("Toggle Transparency Grid") },
-        { key: "?", label: qsTr("Toggle Shortcuts Help") },
-        { key: "Q", label: qsTr("Quit") }
+        { key: "T / ? / Q", label: qsTr("Grid / Help / Quit") }
     ]
 
     Rectangle {

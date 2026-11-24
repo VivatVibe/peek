@@ -100,8 +100,20 @@ void PortalFilePicker::savePdf(const QString &title,
                                const QString &currentFolder,
                                std::function<void(const QString &path)> onSelected,
                                std::function<void(const QString &error)> onError) {
+    saveFile(title, suggestedName, currentFolder, tr("PDF documents"), "application/pdf",
+             std::move(onSelected), std::move(onError));
+}
+
+void PortalFilePicker::saveFile(const QString &title,
+                                const QString &suggestedName,
+                                const QString &currentFolder,
+                                const QString &filterLabel,
+                                const QString &mimeType,
+                                std::function<void(const QString &path)> onSelected,
+                                std::function<void(const QString &error)> onError) {
     QList<PortalFilter> filters;
-    filters.append({tr("PDF documents"), {{1, "application/pdf"}}});
+    filters.append({filterLabel, {{1, mimeType}}});
+    filters.append({tr("All files"), {{0, "*"}}});
 
     QVariantMap options;
     options.insert("current_name", suggestedName);

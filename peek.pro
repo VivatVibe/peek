@@ -8,6 +8,7 @@ HEADERS += \
     src/backend.h \
     src/cli.h \
     src/filepicker.h \
+    src/imageops.h \
     src/portalfilepicker.h \
     src/printrenderer.h \
     src/theme.h \
@@ -16,6 +17,7 @@ HEADERS += \
 SOURCES += \
     src/backend.cpp \
     src/cli.cpp \
+    src/imageops.cpp \
     src/main.cpp \
     src/portalfilepicker.cpp \
     src/printrenderer.cpp \

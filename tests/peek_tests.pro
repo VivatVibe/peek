@@ -9,6 +9,7 @@ HEADERS += \
     ../src/backend.h \
     ../src/cli.h \
     ../src/filepicker.h \
+    ../src/imageops.h \
     ../src/printrenderer.h \
     ../src/theme.h \
     ../src/translator.h
@@ -17,6 +18,7 @@ SOURCES += \
     peek_tests.cpp \
     ../src/backend.cpp \
     ../src/cli.cpp \
+    ../src/imageops.cpp \
     ../src/printrenderer.cpp \
     ../src/theme.cpp \
     ../src/translator.cpp

@@ -1,12 +1,14 @@
 #include <QDir>
 #include <QFile>
 #include <QImage>
+#include <QImageReader>
 #include <QTemporaryDir>
 #include <QtTest>
 
 #include "backend.h"
 #include "cli.h"
 #include "filepicker.h"
+#include "imageops.h"
 #include "printrenderer.h"
 #include "theme.h"
 #include "translator.h"
@@ -30,6 +32,17 @@ public:
                  const QString &,
                  std::function<void(const QString &path)> onSelected,
                  std::function<void(const QString &error)>) override {
+        if (onSelected && !nextSavePath.isEmpty())
+            onSelected(nextSavePath);
+    }
+
+    void saveFile(const QString &,
+                  const QString &,
+                  const QString &,
+                  const QString &,
+                  const QString &,
+                  std::function<void(const QString &path)> onSelected,
+                  std::function<void(const QString &error)>) override {
         if (onSelected && !nextSavePath.isEmpty())
             onSelected(nextSavePath);
     }
@@ -96,13 +109,82 @@ private slots:
         backend.redo();
         QCOMPARE(backend.rotation(), 90);
 
-        // Original file on disk must remain untouched.
         QCOMPARE(readFile(path), originalBytes);
+    }
+
+    void cropsResizesAdjustsColorAndExportsAtomically() {
+        QTemporaryDir dir;
+        // Build a muted dark-gray image so auto-levels and color adjustments produce measurable changes.
+        QImage src(400, 200, QImage::Format_ARGB32);
+        for (int y = 0; y < src.height(); ++y) {
+            for (int x = 0; x < src.width(); ++x)
+                src.setPixelColor(x, y, QColor(60 + (x % 40), 70 + (y % 40), 90));
+        }
+        const QString imgPath = dir.filePath("dark.png");
+        QVERIFY(src.save(imgPath));
+        const QByteArray originalBytes = readFile(imgPath);
+
+        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions");
+        QVERIFY(backend.openFiles({imgPath}));
+        QVERIFY(!backend.hasUnsavedEdits());
+
+        // Crop to center 200x100.
+        backend.setSelectionRect(0.25, 0.25, 0.5, 0.5);
+        backend.cropToSelection();
+        QVERIFY(!backend.hasSelection());
+        QCOMPARE(backend.imageWidth(), 200);
+        QCOMPARE(backend.imageHeight(), 100);
+        QVERIFY(backend.hasUnsavedEdits());
+
+        // Resize to 100x50.
+        backend.applyResize(100, 50);
+        QCOMPARE(backend.imageWidth(), 100);
+        QCOMPARE(backend.imageHeight(), 50);
+        QCOMPARE(backend.nativeWidth(), 200);
+        QCOMPARE(backend.nativeHeight(), 100);
+
+        // Live color edit with single undo step.
+        const QRgb beforeColor = backend.displayImage().pixel(10, 10);
+        backend.beginColorEdit();
+        backend.setColorAdjustments(0.5, 0.2, 0.0, 0.1);
+        backend.commitColorEdit();
+        QVERIFY(backend.hasColorAdjustments());
+        QVERIFY(qRed(backend.displayImage().pixel(10, 10)) > qRed(beforeColor));
+
+        // Auto levels produces non-identity adjustments for low-contrast image.
+        backend.autoLevels();
+        QVERIFY(backend.hasColorAdjustments());
+
+        // Export to JPEG atomically and verify unsaved flag clears.
+        backend.setExportFormat("jpeg");
+        backend.setExportQuality(85);
+        QVERIFY(backend.exportSupportsQuality());
+        QVERIFY(backend.estimatedExportBytes() > 100);
+
+        const QString outJpg = dir.filePath("converted.jpg");
+        QVERIFY(backend.exportImageTo(outJpg));
+        QVERIFY(!backend.hasUnsavedEdits());
+
+        QImageReader check(outJpg);
+        QCOMPARE(check.format(), QByteArray("jpeg"));
+        QCOMPARE(check.size(), QSize(100, 50));
+
+        // Undo color + resize + crop restores original dimensions.
+        backend.undo(); // undo autoLevels
+        backend.undo(); // undo manual color
+        backend.undo(); // undo resize
+        QCOMPARE(backend.imageWidth(), 200);
+        backend.undo(); // undo crop
+        QCOMPARE(backend.imageWidth(), 400);
+        QCOMPARE(backend.imageHeight(), 200);
+
+        // Original file on disk must never be modified.
+        QCOMPARE(readFile(imgPath), originalBytes);
     }
 
     void printRendererComputesFitFillAndScale() {
         const QRectF area(0, 0, 200, 300);
-        const QSize imgSize(400, 200); // 2:1 landscape
+        const QSize imgSize(400, 200);
 
         PrintSettings fit;
         fit.scaleMode = "fit";
@@ -163,7 +245,6 @@ private slots:
         QVERIFY(backend.openFiles({paths.first()}));
         QCOMPARE(backend.imageCount(), 5);
 
-        // Select region (half width, half height) and verify printableImage crops it.
         backend.setSelectionRect(0.25, 0.25, 0.5, 0.5);
         QVERIFY(backend.hasSelection());
         QVERIFY(backend.printSelectionOnly());
@@ -174,7 +255,6 @@ private slots:
         backend.setPrintSelectionOnly(false);
         QCOMPARE(backend.printableImage().size(), QSize(400, 200));
 
-        // Multi-select all 5 images and pack 4-up -> 2 pages.
         backend.selectAllFiles();
         QCOMPARE(backend.selectedCount(), 5);
         backend.preparePrintSheet();
@@ -186,7 +266,6 @@ private slots:
         QCOMPARE(backend.previewPageIndex(), 1);
         QCOMPARE(backend.previewPageImages().size(), 1);
 
-        // Export multi-page PDF.
         const QString pdfPath = dir.filePath("batch.pdf");
         backend.setCutGuides(true);
         QVERIFY(backend.savePdfTo(pdfPath));
@@ -251,19 +330,29 @@ private slots:
         QVERIFY(logged.contains("PrintQuality=High"));
     }
 
-    void cliExportsMultiUpPdfHeadlessly() {
+    void cliExportsMultiUpPdfAndConvertedImageHeadlessly() {
         QTemporaryDir dir;
         const QString p1 = makeImage(dir.path(), "cli1.png", 500, 300, Qt::magenta);
         const QString p2 = makeImage(dir.path(), "cli2.png", 500, 300, Qt::cyan);
         const QString outPdf = dir.filePath("cli_out.pdf");
+        const QString outJpg = dir.filePath("cli_edited.jpg");
 
         QStringList guiFiles;
-        const auto code = Cli::run({"peek", "export", p1, p2, "-o", outPdf,
-                                    "--paper", "letter", "--per-page", "2", "--cut-guides", "--grayscale", "--json"},
-                                   guiFiles);
-        QVERIFY(code.has_value());
-        QCOMPARE(*code, 0);
+        const auto codePdf = Cli::run({"peek", "export", p1, p2, "-o", outPdf,
+                                       "--paper", "letter", "--per-page", "2", "--cut-guides", "--grayscale", "--json"},
+                                      guiFiles);
+        QVERIFY(codePdf.has_value());
+        QCOMPARE(*codePdf, 0);
         QVERIFY(readFile(outPdf).startsWith("%PDF-"));
+
+        const auto codeImg = Cli::run({"peek", "export", p1, "-o", outJpg,
+                                       "--crop", "50,50,200,100", "--resize", "100x50", "--quality", "80", "--json"},
+                                      guiFiles);
+        QVERIFY(codeImg.has_value());
+        QCOMPARE(*codeImg, 0);
+        QImageReader reader(outJpg);
+        QCOMPARE(reader.format(), QByteArray("jpeg"));
+        QCOMPARE(reader.size(), QSize(100, 50));
     }
 
     void themeFallsBack() {

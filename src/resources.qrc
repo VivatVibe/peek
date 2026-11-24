@@ -2,6 +2,10 @@
     <qresource prefix="/">
         <file alias="Main.qml">Main.qml</file>
         <file alias="PrintSheet.qml">PrintSheet.qml</file>
+        <file alias="ResizeSheet.qml">ResizeSheet.qml</file>
+        <file alias="ColorSheet.qml">ColorSheet.qml</file>
+        <file alias="ExportSheet.qml">ExportSheet.qml</file>
+        <file alias="QuitConfirmOverlay.qml">QuitConfirmOverlay.qml</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
         <file alias="SegmentBar.qml">SegmentBar.qml</file>
         <file alias="ThumbnailSidebar.qml">ThumbnailSidebar.qml</file>

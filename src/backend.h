@@ -1,6 +1,7 @@
 #pragma once
 
 #include "filepicker.h"
+#include "imageops.h"
 #include "printrenderer.h"
 
 #include <QHash>
@@ -15,16 +16,6 @@
 #include <QVariantList>
 #include <QVector>
 
-struct TransformState {
-    int rotation = 0; // 0, 90, 180, 270
-    bool flipH = false;
-    bool flipV = false;
-
-    bool operator==(const TransformState &other) const {
-        return rotation == other.rotation && flipH == other.flipH && flipV == other.flipV;
-    }
-};
-
 struct CupsOption {
     QString key;
     QStringList values;
@@ -38,6 +29,8 @@ class Backend : public QObject {
     Q_PROPERTY(QString fileName READ fileName NOTIFY imageChanged)
     Q_PROPERTY(int imageWidth READ imageWidth NOTIFY imageChanged)
     Q_PROPERTY(int imageHeight READ imageHeight NOTIFY imageChanged)
+    Q_PROPERTY(int nativeWidth READ nativeWidth NOTIFY imageChanged)
+    Q_PROPERTY(int nativeHeight READ nativeHeight NOTIFY imageChanged)
     Q_PROPERTY(int imageVersion READ imageVersion NOTIFY imageChanged)
     Q_PROPERTY(int fileListVersion READ fileListVersion NOTIFY filesChanged)
     Q_PROPERTY(int imageIndex READ imageIndex NOTIFY imageChanged)
@@ -47,7 +40,21 @@ class Backend : public QObject {
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY imageChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY imageChanged)
     Q_PROPERTY(bool isTransformed READ isTransformed NOTIFY imageChanged)
+    Q_PROPERTY(bool hasUnsavedEdits READ hasUnsavedEdits NOTIFY imageChanged)
     Q_PROPERTY(int rotation READ rotation NOTIFY imageChanged)
+
+    // Color adjustments (-1.0 .. +1.0).
+    Q_PROPERTY(double exposure READ exposure NOTIFY colorChanged)
+    Q_PROPERTY(double contrast READ contrast NOTIFY colorChanged)
+    Q_PROPERTY(double saturation READ saturation NOTIFY colorChanged)
+    Q_PROPERTY(double brightness READ brightness NOTIFY colorChanged)
+    Q_PROPERTY(bool hasColorAdjustments READ hasColorAdjustments NOTIFY colorChanged)
+
+    // Export / convert format settings.
+    Q_PROPERTY(QString exportFormat READ exportFormat WRITE setExportFormat NOTIFY exportSettingsChanged)
+    Q_PROPERTY(int exportQuality READ exportQuality WRITE setExportQuality NOTIFY exportSettingsChanged)
+    Q_PROPERTY(bool exportSupportsQuality READ exportSupportsQuality NOTIFY exportSettingsChanged)
+    Q_PROPERTY(qint64 estimatedExportBytes READ estimatedExportBytes NOTIFY exportSettingsChanged)
 
     // Selection region in normalized image coordinates (0..1).
     Q_PROPERTY(bool hasSelection READ hasSelection NOTIFY selectionChanged)
@@ -103,6 +110,8 @@ public:
     QString fileName() const;
     int imageWidth() const { return m_displayImage.width(); }
     int imageHeight() const { return m_displayImage.height(); }
+    int nativeWidth() const { return m_preResizeSize.width(); }
+    int nativeHeight() const { return m_preResizeSize.height(); }
     int imageVersion() const { return m_imageVersion; }
     int fileListVersion() const { return m_fileListVersion; }
     int imageIndex() const { return m_currentIndex; }
@@ -111,8 +120,22 @@ public:
     int selectedCount() const { return m_selectedIndices.size(); }
     bool canUndo() const { return !m_undoStack.isEmpty(); }
     bool canRedo() const { return !m_redoStack.isEmpty(); }
-    bool isTransformed() const { return !(m_transform == TransformState{}); }
-    int rotation() const { return m_transform.rotation; }
+    bool isTransformed() const { return !m_edit.isIdentity(); }
+    bool hasUnsavedEdits() const { return !m_edit.isIdentity() && m_editVersion != m_exportedEditVersion; }
+    int rotation() const { return m_edit.rotation; }
+
+    double exposure() const { return m_edit.color.exposure; }
+    double contrast() const { return m_edit.color.contrast; }
+    double saturation() const { return m_edit.color.saturation; }
+    double brightness() const { return m_edit.color.brightness; }
+    bool hasColorAdjustments() const { return !m_edit.color.isIdentity(); }
+
+    QString exportFormat() const { return m_exportFormat; }
+    void setExportFormat(const QString &format);
+    int exportQuality() const { return m_exportQuality; }
+    void setExportQuality(int quality);
+    bool exportSupportsQuality() const { return ImageOps::formatSupportsQuality(m_exportFormat); }
+    qint64 estimatedExportBytes() const { return m_estimatedExportBytes; }
 
     bool hasSelection() const { return !m_selectionNorm.isEmpty(); }
     QRectF selectionNorm() const { return m_selectionNorm; }
@@ -190,6 +213,17 @@ public:
 
     Q_INVOKABLE void setSelectionRect(double x, double y, double w, double h);
     Q_INVOKABLE void clearSelection();
+    Q_INVOKABLE void cropToSelection();
+    Q_INVOKABLE void copyToClipboard();
+
+    Q_INVOKABLE void applyResize(int width, int height);
+    Q_INVOKABLE void resetResize();
+
+    Q_INVOKABLE void beginColorEdit();
+    Q_INVOKABLE void setColorAdjustments(double exposure, double contrast, double saturation, double brightness);
+    Q_INVOKABLE void commitColorEdit();
+    Q_INVOKABLE void autoLevels();
+    Q_INVOKABLE void resetColorAdjustments();
 
     Q_INVOKABLE void rotateLeft();
     Q_INVOKABLE void rotateRight();
@@ -198,6 +232,10 @@ public:
     Q_INVOKABLE void resetTransforms();
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
+
+    Q_INVOKABLE void refreshExportEstimate();
+    Q_INVOKABLE void exportImageDialog();
+    Q_INVOKABLE bool exportImageTo(const QString &outputPath);
 
     Q_INVOKABLE void preparePrintSheet();
     Q_INVOKABLE void nextPreviewPage();
@@ -219,6 +257,8 @@ public:
 
 signals:
     void imageChanged();
+    void colorChanged();
+    void exportSettingsChanged();
     void filesChanged();
     void selectionChanged();
     void printersChanged();
@@ -229,8 +269,9 @@ signals:
 
 private:
     bool loadIndex(int index);
-    void applyTransformState(const TransformState &next, bool recordUndo);
-    void rebuildDisplayImage();
+    void applyEditState(const EditState &next, bool recordUndo);
+    void rebuildPreColorImage();
+    void rebuildDisplayImageFromPreColor();
     void refreshPrinterOptions();
     void clearPrinterOptions();
     void clampPreviewPage();
@@ -248,15 +289,25 @@ private:
     QSet<int> m_selectedIndices;
     int m_currentIndex = -1;
     QImage m_sourceImage;
+    QImage m_preColorImage;
     QImage m_displayImage;
+    QSize m_preResizeSize;
     mutable QHash<int, QImage> m_thumbCache;
     mutable QHash<QString, QImage> m_batchImageCache;
     int m_imageVersion = 0;
     int m_fileListVersion = 0;
+    int m_editVersion = 0;
+    int m_exportedEditVersion = 0;
 
-    TransformState m_transform;
-    QVector<TransformState> m_undoStack;
-    QVector<TransformState> m_redoStack;
+    EditState m_edit;
+    EditState m_colorSnapshot;
+    bool m_colorEditing = false;
+    QVector<EditState> m_undoStack;
+    QVector<EditState> m_redoStack;
+
+    QString m_exportFormat = "jpeg";
+    int m_exportQuality = 90;
+    qint64 m_estimatedExportBytes = 0;
 
     QRectF m_selectionNorm;
     bool m_printSelectionOnly = false;

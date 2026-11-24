@@ -84,5 +84,23 @@
     "few": "%n محددة",
     "many": "%n محددة",
     "other": "%n محددة"
-  }
+  },
+  "Adjust Size": "تغيير الحجم",
+  "Adjust Color": "تعديل الألوان",
+  "Exposure": "التعريض",
+  "Contrast": "التباين",
+  "Saturation": "التشبع",
+  "Brightness": "السطوع",
+  "Auto Levels": "توازن تلقائي",
+  "Reset": "إعادة تعيين",
+  "Export Image": "تصدير الصورة",
+  "Export": "تصدير",
+  "Export…": "تصدير…",
+  "Format": "التنسيق",
+  "Quality": "الجودة",
+  "Crop": "قص",
+  "Copy": "نسخ",
+  "Apply": "تطبيق",
+  "Unsaved Edits": "تعديلات غير محفوظة",
+  "Discard & Quit": "تجاهل وخروج"
 }

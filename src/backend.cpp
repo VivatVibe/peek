@@ -1,9 +1,11 @@
 #include "backend.h"
 
+#include <QClipboard>
 #include <QCollator>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QImageReader>
 #include <QRegularExpression>
 #include <QStandardPaths>
@@ -38,6 +40,16 @@ QVariantList toOptionModel(const CupsOption &opt) {
         list.append(row);
     }
     return list;
+}
+
+QString formatFilterLabel(const QString &format) {
+    const QString norm = ImageOps::normalizedFormat(format);
+    if (norm == "jpeg") return QObject::tr("JPEG images");
+    if (norm == "webp") return QObject::tr("WebP images");
+    if (norm == "tiff") return QObject::tr("TIFF images");
+    if (norm == "bmp") return QObject::tr("BMP images");
+    if (norm == "pdf") return QObject::tr("PDF documents");
+    return QObject::tr("PNG images");
 }
 
 } // namespace
@@ -208,6 +220,22 @@ QVariantList Backend::fileItems() const {
     return items;
 }
 
+void Backend::setExportFormat(const QString &format) {
+    const QString norm = ImageOps::normalizedFormat(format);
+    if (norm == m_exportFormat)
+        return;
+    m_exportFormat = norm;
+    refreshExportEstimate();
+}
+
+void Backend::setExportQuality(int quality) {
+    const int clamped = std::clamp(quality, 10, 100);
+    if (clamped == m_exportQuality)
+        return;
+    m_exportQuality = clamped;
+    refreshExportEstimate();
+}
+
 int Backend::selectionPixelWidth() const {
     return selectionPixelRect().width();
 }
@@ -248,16 +276,14 @@ QImage Backend::thumbnailForIndex(int index) const {
 }
 
 QImage Backend::printableImage() const {
-    QImage img = PrintRenderer::applyTransforms(m_sourceImage,
-                                                m_transform.rotation,
-                                                m_transform.flipH,
-                                                m_transform.flipV,
-                                                m_printSettings.grayscale);
+    QImage img = m_displayImage;
     if (m_printSelectionOnly && hasSelection() && !img.isNull()) {
         const QRect crop = selectionPixelRect().intersected(img.rect());
         if (crop.isValid() && crop.width() >= 2 && crop.height() >= 2)
             img = img.copy(crop);
     }
+    if (m_printSettings.grayscale && !img.isNull())
+        img = img.convertToFormat(QImage::Format_Grayscale8).convertToFormat(QImage::Format_ARGB32);
     return img;
 }
 
@@ -521,8 +547,6 @@ bool Backend::openFiles(const QStringList &paths) {
         return false;
     }
 
-    // When a single image is opened, include its sibling images in natural order
-    // so the user can step through the folder with Left/Right, like Preview.
     int startIndex = 0;
     if (resolved.size() == 1) {
         const QFileInfo single(resolved.first());
@@ -674,68 +698,278 @@ void Backend::clearSelection() {
     emit printSettingsChanged();
 }
 
+void Backend::cropToSelection() {
+    if (!hasImage() || !hasSelection())
+        return;
+
+    // Map normalized selection back into post-rotate/flip coordinates (before
+    // any resize), composing with an existing cropRect if already cropped.
+    const QRect baseRect = m_edit.cropRect.isEmpty()
+                               ? QRect(QPoint(0, 0), m_preResizeSize)
+                               : m_edit.cropRect;
+    const int cx = baseRect.x() + static_cast<int>(std::round(m_selectionNorm.x() * baseRect.width()));
+    const int cy = baseRect.y() + static_cast<int>(std::round(m_selectionNorm.y() * baseRect.height()));
+    const int cw = std::max(8, static_cast<int>(std::round(m_selectionNorm.width() * baseRect.width())));
+    const int ch = std::max(8, static_cast<int>(std::round(m_selectionNorm.height() * baseRect.height())));
+
+    EditState next = m_edit;
+    next.cropRect = QRect(cx, cy, cw, ch).intersected(baseRect);
+    next.resizeTarget = QSize();
+    clearSelection();
+    applyEditState(next, true);
+}
+
+void Backend::copyToClipboard() {
+    if (!hasImage())
+        return;
+    QClipboard *clip = QGuiApplication::clipboard();
+    if (!clip) {
+        setError(tr("Clipboard is unavailable."));
+        return;
+    }
+
+    if (hasSelection()) {
+        const QRect crop = selectionPixelRect().intersected(m_displayImage.rect());
+        if (crop.isValid() && crop.width() >= 2 && crop.height() >= 2) {
+            clip->setImage(m_displayImage.copy(crop));
+            setStatus(tr("Copied selection to clipboard"));
+            return;
+        }
+    }
+
+    clip->setImage(m_displayImage);
+    setStatus(tr("Copied image to clipboard"));
+}
+
+void Backend::applyResize(int width, int height) {
+    if (!hasImage())
+        return;
+    const int w = std::clamp(width, 1, 16384);
+    const int h = std::clamp(height, 1, 16384);
+
+    EditState next = m_edit;
+    if (QSize(w, h) == m_preResizeSize)
+        next.resizeTarget = QSize();
+    else
+        next.resizeTarget = QSize(w, h);
+
+    clearSelection();
+    applyEditState(next, true);
+}
+
+void Backend::resetResize() {
+    if (!hasImage() || m_edit.resizeTarget.isEmpty())
+        return;
+    EditState next = m_edit;
+    next.resizeTarget = QSize();
+    clearSelection();
+    applyEditState(next, true);
+}
+
+void Backend::beginColorEdit() {
+    if (!hasImage() || m_colorEditing)
+        return;
+    m_colorSnapshot = m_edit;
+    m_colorEditing = true;
+}
+
+void Backend::setColorAdjustments(double exposure, double contrast, double saturation, double brightness) {
+    if (!hasImage())
+        return;
+    if (!m_colorEditing)
+        beginColorEdit();
+
+    ColorAdjustments next;
+    next.exposure = std::clamp(exposure, -1.0, 1.0);
+    next.contrast = std::clamp(contrast, -1.0, 1.0);
+    next.saturation = std::clamp(saturation, -1.0, 1.0);
+    next.brightness = std::clamp(brightness, -1.0, 1.0);
+
+    if (next == m_edit.color)
+        return;
+
+    m_edit.color = next;
+    ++m_editVersion;
+    rebuildDisplayImageFromPreColor();
+    emit colorChanged();
+    emit printSettingsChanged();
+}
+
+void Backend::commitColorEdit() {
+    if (!m_colorEditing)
+        return;
+    m_colorEditing = false;
+    if (!(m_edit == m_colorSnapshot)) {
+        m_undoStack.push_back(m_colorSnapshot);
+        m_redoStack.clear();
+        emit imageChanged();
+    }
+}
+
+void Backend::autoLevels() {
+    if (!hasImage())
+        return;
+    commitColorEdit();
+    EditState next = m_edit;
+    next.color = ImageOps::computeAutoLevels(m_preColorImage);
+    applyEditState(next, true);
+}
+
+void Backend::resetColorAdjustments() {
+    if (!hasImage())
+        return;
+    commitColorEdit();
+    if (m_edit.color.isIdentity())
+        return;
+    EditState next = m_edit;
+    next.color = ColorAdjustments{};
+    applyEditState(next, true);
+}
+
 void Backend::rotateLeft() {
     if (!hasImage())
         return;
+    commitColorEdit();
     clearSelection();
-    TransformState next = m_transform;
+    EditState next = m_edit;
     next.rotation = (next.rotation + 270) % 360;
-    applyTransformState(next, true);
+    next.cropRect = QRect();
+    next.resizeTarget = QSize();
+    applyEditState(next, true);
 }
 
 void Backend::rotateRight() {
     if (!hasImage())
         return;
+    commitColorEdit();
     clearSelection();
-    TransformState next = m_transform;
+    EditState next = m_edit;
     next.rotation = (next.rotation + 90) % 360;
-    applyTransformState(next, true);
+    next.cropRect = QRect();
+    next.resizeTarget = QSize();
+    applyEditState(next, true);
 }
 
 void Backend::toggleFlipHorizontal() {
     if (!hasImage())
         return;
+    commitColorEdit();
     clearSelection();
-    TransformState next = m_transform;
+    EditState next = m_edit;
     next.flipH = !next.flipH;
-    applyTransformState(next, true);
+    next.cropRect = QRect();
+    applyEditState(next, true);
 }
 
 void Backend::toggleFlipVertical() {
     if (!hasImage())
         return;
+    commitColorEdit();
     clearSelection();
-    TransformState next = m_transform;
+    EditState next = m_edit;
     next.flipV = !next.flipV;
-    applyTransformState(next, true);
+    next.cropRect = QRect();
+    applyEditState(next, true);
 }
 
 void Backend::resetTransforms() {
     if (!hasImage() || !isTransformed())
         return;
+    commitColorEdit();
     clearSelection();
-    applyTransformState(TransformState{}, true);
+    applyEditState(EditState{}, true);
 }
 
 void Backend::undo() {
+    commitColorEdit();
     if (m_undoStack.isEmpty())
         return;
     clearSelection();
-    m_redoStack.push_back(m_transform);
-    const TransformState previous = m_undoStack.takeLast();
-    applyTransformState(previous, false);
+    m_redoStack.push_back(m_edit);
+    const EditState previous = m_undoStack.takeLast();
+    applyEditState(previous, false);
 }
 
 void Backend::redo() {
+    commitColorEdit();
     if (m_redoStack.isEmpty())
         return;
     clearSelection();
-    m_undoStack.push_back(m_transform);
-    const TransformState next = m_redoStack.takeLast();
-    applyTransformState(next, false);
+    m_undoStack.push_back(m_edit);
+    const EditState next = m_redoStack.takeLast();
+    applyEditState(next, false);
+}
+
+void Backend::refreshExportEstimate() {
+    if (!hasImage()) {
+        m_estimatedExportBytes = 0;
+    } else {
+        m_estimatedExportBytes = ImageOps::estimateEncodedSize(m_displayImage, m_exportFormat, m_exportQuality);
+    }
+    emit exportSettingsChanged();
+}
+
+void Backend::exportImageDialog() {
+    if (!hasImage()) {
+        setError(tr("Open an image before exporting."));
+        return;
+    }
+    if (!m_filePicker) {
+        setError(tr("File picker is unavailable."));
+        return;
+    }
+
+    const QFileInfo info(filePath());
+    const QString ext = ImageOps::extensionForFormat(m_exportFormat);
+    const QString suffix = isTransformed() ? "-edited" : "-copy";
+    const QString suggested = info.completeBaseName() + suffix + "." + ext;
+
+    m_filePicker->saveFile(
+        tr("Export Image"),
+        suggested,
+        info.absolutePath(),
+        formatFilterLabel(m_exportFormat),
+        ImageOps::mimeTypeForFormat(m_exportFormat),
+        [this](const QString &path) { exportImageTo(path); },
+        [this](const QString &error) { setError(error); });
+}
+
+bool Backend::exportImageTo(const QString &outputPath) {
+    clearMessages();
+    if (!hasImage()) {
+        setError(tr("Open an image before exporting."));
+        return false;
+    }
+
+    commitColorEdit();
+
+    const QString norm = ImageOps::normalizedFormat(m_exportFormat);
+    const QString ext = "." + ImageOps::extensionForFormat(norm);
+    QString finalPath = outputPath;
+    if (QFileInfo(finalPath).suffix().isEmpty())
+        finalPath += ext;
+
+    QString err;
+    bool ok = false;
+    if (norm == "pdf") {
+        ok = PrintRenderer::exportPdf(finalPath, buildPrintPages(), m_printSettings, &err);
+    } else {
+        ok = ImageOps::exportImageAtomic(m_displayImage, finalPath, norm, m_exportQuality, &err);
+    }
+
+    if (!ok) {
+        setError(err);
+        return false;
+    }
+
+    m_exportedEditVersion = m_editVersion;
+    emit imageChanged();
+    setStatus(tr("Exported %1").arg(QFileInfo(finalPath).fileName()));
+    return true;
 }
 
 void Backend::preparePrintSheet() {
+    commitColorEdit();
     refreshPrinters();
     if (m_selectedIndices.size() > 1)
         m_multiMode = "selected";
@@ -874,8 +1108,6 @@ QStringList Backend::buildLpArguments(const QString &printer,
     args << "-n" << QString::number(std::clamp(settings.copies, 1, 99));
     if (!jobTitle.isEmpty())
         args << "-t" << jobTitle;
-    // The PDF is already laid out to exact physical paper dimensions and margins,
-    // so tell CUPS the matching media size and disable double-scaling.
     args << "-o" << ("media=" + spec.cupsMedia);
     args << "-o" << "print-scaling=none";
     if (settings.grayscale)
@@ -975,34 +1207,66 @@ bool Backend::loadIndex(int index) {
 
     m_currentIndex = index;
     m_sourceImage = loaded;
-    m_transform = TransformState{};
+    m_edit = EditState{};
+    m_colorEditing = false;
     m_undoStack.clear();
     m_redoStack.clear();
+    m_editVersion = 0;
+    m_exportedEditVersion = 0;
+    m_exportFormat = loaded.hasAlphaChannel() ? "png" : "jpeg";
     clearSelection();
-    rebuildDisplayImage();
+    rebuildPreColorImage();
+    rebuildDisplayImageFromPreColor();
     clampPreviewPage();
+    emit colorChanged();
+    emit exportSettingsChanged();
     emit printSettingsChanged();
     return true;
 }
 
-void Backend::applyTransformState(const TransformState &next, bool recordUndo) {
-    if (next == m_transform)
+void Backend::applyEditState(const EditState &next, bool recordUndo) {
+    if (next == m_edit)
         return;
     if (recordUndo) {
-        m_undoStack.push_back(m_transform);
+        m_undoStack.push_back(m_edit);
         m_redoStack.clear();
     }
-    m_transform = next;
-    rebuildDisplayImage();
+    const bool geometryChanged = m_edit.rotation != next.rotation ||
+                                 m_edit.flipH != next.flipH ||
+                                 m_edit.flipV != next.flipV ||
+                                 m_edit.cropRect != next.cropRect ||
+                                 m_edit.resizeTarget != next.resizeTarget;
+    m_edit = next;
+    ++m_editVersion;
+    if (geometryChanged)
+        rebuildPreColorImage();
+    rebuildDisplayImageFromPreColor();
+    emit colorChanged();
     emit printSettingsChanged();
 }
 
-void Backend::rebuildDisplayImage() {
-    m_displayImage = PrintRenderer::applyTransforms(m_sourceImage,
-                                                    m_transform.rotation,
-                                                    m_transform.flipH,
-                                                    m_transform.flipV,
-                                                    false);
+void Backend::rebuildPreColorImage() {
+    if (m_sourceImage.isNull()) {
+        m_preColorImage = {};
+        m_preResizeSize = {};
+        return;
+    }
+    QImage img = PrintRenderer::applyTransforms(m_sourceImage, m_edit.rotation, m_edit.flipH, m_edit.flipV, false);
+    if (!m_edit.cropRect.isEmpty()) {
+        const QRect clamped = m_edit.cropRect.intersected(img.rect());
+        if (clamped.isValid() && clamped.width() >= 2 && clamped.height() >= 2)
+            img = img.copy(clamped);
+    }
+    m_preResizeSize = img.size();
+    if (!m_edit.resizeTarget.isEmpty() && m_edit.resizeTarget != img.size())
+        img = img.scaled(m_edit.resizeTarget, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    m_preColorImage = img;
+}
+
+void Backend::rebuildDisplayImageFromPreColor() {
+    m_displayImage = m_edit.color.isIdentity()
+                         ? m_preColorImage
+                         : ImageOps::applyColorAdjustments(m_preColorImage, m_edit.color);
     ++m_imageVersion;
     emit imageChanged();
 }
