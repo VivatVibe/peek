@@ -403,6 +403,7 @@ ApplicationWindow {
                         MouseArea {
                             id: panArea
                             anchors.fill: parent
+                            enabled: !win.modalOpen
                             acceptedButtons: Qt.LeftButton
                             cursorShape: (win.markupMode || win.selectMode || win.draggingSelection)
                                          ? Qt.CrossCursor
@@ -503,6 +504,8 @@ ApplicationWindow {
                             }
 
                             onWheel: function(wheel) {
+                                if (win.modalOpen)
+                                    return
                                 const factor = wheel.angleDelta.y > 0 ? 1.15 : (1.0 / 1.15)
                                 win.zoomBy(factor, wheel.x, wheel.y)
                             }

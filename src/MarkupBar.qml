@@ -19,7 +19,10 @@ Rectangle {
     border.color: "#343440"
     border.width: 1
 
-    MouseArea { anchors.fill: parent }
+    MouseArea {
+        anchors.fill: parent
+        onWheel: function(wheel) { wheel.accepted = true }
+    }
 
     readonly property var tools: [
         { id: "rect", icon: "□", tip: qsTr("Rectangle") },

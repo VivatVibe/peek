@@ -65,7 +65,7 @@ Item {
         return 0
     }
 
-    // Dimmed backdrop; clicking outside closes the sheet.
+    // Dimmed backdrop; clicking outside closes the sheet and wheel events never leak through.
     Rectangle {
         anchors.fill: parent
         color: "#b0000000"
@@ -73,6 +73,7 @@ Item {
         MouseArea {
             anchors.fill: parent
             onClicked: sheet.closeRequested()
+            onWheel: function(wheel) { wheel.accepted = true }
         }
     }
 
@@ -87,8 +88,11 @@ Item {
         border.color: "#2e2e36"
         border.width: 1
 
-        // Absorb clicks inside the card so they don't dismiss the sheet.
-        MouseArea { anchors.fill: parent }
+        // Absorb clicks and wheel events inside the card so they don't hit the canvas behind.
+        MouseArea {
+            anchors.fill: parent
+            onWheel: function(wheel) { wheel.accepted = true }
+        }
 
         ColumnLayout {
             anchors.fill: parent

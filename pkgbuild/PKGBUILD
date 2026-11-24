@@ -1,6 +1,6 @@
 pkgname=peek
 pkgver=0.5.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Fast image preview and effortless printing for Omarchy'
 arch=('x86_64' 'aarch64')
 license=('MIT')

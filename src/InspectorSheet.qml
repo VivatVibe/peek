@@ -16,7 +16,10 @@ Rectangle {
     border.color: "#32323c"
     border.width: 1
 
-    MouseArea { anchors.fill: parent }
+    MouseArea {
+        anchors.fill: parent
+        onWheel: function(wheel) { wheel.accepted = true }
+    }
 
     function formatBytes(bytes) {
         void translator.language
