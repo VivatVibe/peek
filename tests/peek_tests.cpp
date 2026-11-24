@@ -9,6 +9,8 @@
 #include "cli.h"
 #include "filepicker.h"
 #include "imageops.h"
+#include "inspector.h"
+#include "markup.h"
 #include "presetstore.h"
 #include "printrenderer.h"
 #include "theme.h"
@@ -415,6 +417,132 @@ private slots:
             QCOMPARE(second.activePresetId(), QString("last-used"));
             QVERIFY(!second.activePresetRemovable());
         }
+    }
+
+    void markupAnnotationsRenderUndoAndClear() {
+        QTemporaryDir dir;
+        const QString imgPath = makeImage(dir.path(), "canvas.png", 400, 300, Qt::white);
+        const QByteArray originalBytes = readFile(imgPath);
+
+        Backend backend(nullptr, "/nonexistent-lpstat", "/nonexistent-lp", "/nonexistent-lpoptions", dir.filePath("presets.json"));
+        QVERIFY(backend.openFiles({imgPath}));
+        QCOMPARE(backend.annotationCount(), 0);
+
+        // Draw a solid black redaction over the center.
+        MarkupDraftItem draft;
+        draft.setTool("redact");
+        draft.beginStroke(0.4, 0.4);
+        draft.updateStroke(0.6, 0.6);
+        backend.commitDraftAnnotation(&draft);
+
+        QCOMPARE(backend.annotationCount(), 1);
+        QVERIFY(backend.hasUnsavedEdits());
+        QCOMPARE(QColor(backend.displayImage().pixel(200, 150)), QColor("#0a0a0c"));
+
+        // Add a text callout annotation.
+        backend.addTextAnnotation(0.2, 0.2, "Important", QColor("#ff453a"), "m");
+        QCOMPARE(backend.annotationCount(), 2);
+
+        // Undo restores count and pixel state.
+        backend.undo();
+        QCOMPARE(backend.annotationCount(), 1);
+        backend.clearAnnotations();
+        QCOMPARE(backend.annotationCount(), 0);
+        QCOMPARE(QColor(backend.displayImage().pixel(200, 150)), QColor(Qt::white));
+
+        // Original file on disk remains untouched.
+        QCOMPARE(readFile(imgPath), originalBytes);
+    }
+
+    void inspectorReadsMetadataAndJpegExif() {
+        QTemporaryDir dir;
+        QImage img(600, 400, QImage::Format_RGB32);
+        img.fill(Qt::darkBlue);
+        const QString rawJpgPath = dir.filePath("raw.jpg");
+        QVERIFY(img.save(rawJpgPath, "JPEG", 90));
+
+        // Inject a minimal valid little-endian APP1 Exif segment right after SOI (FF D8).
+        QByteArray rawJpeg = readFile(rawJpgPath);
+        QVERIFY(rawJpeg.startsWith("\xFF\xD8"));
+
+        QByteArray tiff;
+        auto put16 = [&](uint16_t v) {
+            tiff.append(static_cast<char>(v & 0xFF));
+            tiff.append(static_cast<char>((v >> 8) & 0xFF));
+        };
+        auto put32 = [&](uint32_t v) {
+            tiff.append(static_cast<char>(v & 0xFF));
+            tiff.append(static_cast<char>((v >> 8) & 0xFF));
+            tiff.append(static_cast<char>((v >> 16) & 0xFF));
+            tiff.append(static_cast<char>((v >> 24) & 0xFF));
+        };
+
+        // TIFF header (8 bytes): "II", 42, IFD0 offset = 8.
+        tiff.append("II", 2);
+        put16(42);
+        put32(8);
+
+        // IFD0 at offset 8: 3 entries (2 + 36 + 4 = 42 bytes -> ends at offset 50).
+        const uint32_t makeOff = 50;
+        const QByteArray makeStr("Fujifilm\0", 9);
+        const uint32_t modelOff = makeOff + static_cast<uint32_t>(makeStr.size());
+        const QByteArray modelStr("X-T5\0", 5);
+        const uint32_t exifIfdOff = modelOff + static_cast<uint32_t>(modelStr.size());
+
+        put16(3);
+        put16(0x010F); put16(2); put32(makeStr.size()); put32(makeOff);
+        put16(0x0110); put16(2); put32(modelStr.size()); put32(modelOff);
+        put16(0x8769); put16(4); put32(1); put32(exifIfdOff);
+        put32(0); // next IFD
+
+        tiff.append(makeStr);
+        tiff.append(modelStr);
+        QCOMPARE(static_cast<uint32_t>(tiff.size()), exifIfdOff);
+
+        // ExifIFD: 4 entries (2 + 48 + 4 = 54 bytes).
+        const uint32_t expOff = exifIfdOff + 54;
+        const uint32_t fnumOff = expOff + 8;
+        const uint32_t focalOff = fnumOff + 8;
+
+        put16(4);
+        put16(0x829A); put16(5); put32(1); put32(expOff);   // ExposureTime 1/250
+        put16(0x829D); put16(5); put32(1); put32(fnumOff);  // FNumber 28/10
+        put16(0x8827); put16(3); put32(1); put32(400);      // ISO 400 (inline)
+        put16(0x920A); put16(5); put32(1); put32(focalOff); // FocalLength 35/1
+        put32(0);
+
+        put32(1); put32(250);
+        put32(28); put32(10);
+        put32(35); put32(1);
+
+        QByteArray app1;
+        app1.append('\xFF');
+        app1.append('\xE1');
+        const uint16_t segLen = static_cast<uint16_t>(2 + 6 + tiff.size());
+        app1.append(static_cast<char>((segLen >> 8) & 0xFF));
+        app1.append(static_cast<char>(segLen & 0xFF));
+        app1.append("Exif\0\0", 6);
+        app1.append(tiff);
+
+        const QString exifJpgPath = dir.filePath("camera.jpg");
+        QByteArray withExif = rawJpeg.left(2) + app1 + rawJpeg.mid(2);
+        write(exifJpgPath, withExif);
+
+        const QVariantMap meta = Inspector::readMetadata(exifJpgPath, img);
+        QCOMPARE(meta.value("format").toString(), QString("JPEG"));
+        QCOMPARE(meta.value("width").toInt(), 600);
+        QCOMPARE(meta.value("height").toInt(), 400);
+        QVERIFY(meta.value("hasExif").toBool());
+        QCOMPARE(meta.value("camera").toString(), QString("Fujifilm X-T5"));
+        QCOMPARE(meta.value("exposureTime").toString(), QString("1/250 s"));
+        QCOMPARE(meta.value("aperture").toString(), QString("f/2.8"));
+        QCOMPARE(meta.value("iso").toString(), QString("ISO 400"));
+        QCOMPARE(meta.value("focalLength").toString(), QString("35 mm"));
+
+        QStringList guiFiles;
+        const auto code = Cli::run({"peek", "inspect", exifJpgPath, "--json"}, guiFiles);
+        QVERIFY(code.has_value());
+        QCOMPARE(*code, 0);
     }
 
     void cliExportsMultiUpPdfAndConvertedImageHeadlessly() {

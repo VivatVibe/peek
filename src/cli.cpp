@@ -1,6 +1,7 @@
 #include "cli.h"
 #include "backend.h"
 #include "imageops.h"
+#include "inspector.h"
 #include "presetstore.h"
 #include "printrenderer.h"
 
@@ -39,6 +40,7 @@ void printUsage() {
         << "  peek [open] [image ...]              Open images in the viewer\n"
         << "  peek printers [--json]               List CUPS printers\n"
         << "  peek presets [--json]                List print presets\n"
+        << "  peek inspect <image> [--json]        Show image dimensions, print size, and EXIF\n"
         << "  peek export <image ...> -o <out> [options] [--json]\n"
         << "                                       Export image (PNG/JPG/WebP/TIFF/BMP) or PDF\n"
         << "  peek print <image ...> [--printer NAME] [--preset NAME] [--copies N] [options] [--json]\n"
@@ -332,7 +334,7 @@ bool isHeadlessCommand(int argc, char *argv[]) {
     if (argc < 2)
         return false;
     const QString cmd = QString::fromLocal8Bit(argv[1]);
-    return cmd == "printers" || cmd == "presets" || cmd == "export" || cmd == "print" || cmd == "skill" ||
+    return cmd == "printers" || cmd == "presets" || cmd == "inspect" || cmd == "export" || cmd == "print" || cmd == "skill" ||
            cmd == "--help" || cmd == "-h" || cmd == "--version" || cmd == "-v";
 }
 
@@ -350,7 +352,49 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
     }
     if (cmd == "--version" || cmd == "-v") {
         QTextStream out(stdout);
-        out << "peek 0.4.0\n";
+        out << "peek 0.5.0\n";
+        return 0;
+    }
+    if (cmd == "inspect") {
+        const bool json = rest.contains("--json");
+        QString target;
+        for (const QString &arg : rest) {
+            if (!arg.startsWith('-')) {
+                target = arg;
+                break;
+            }
+        }
+        if (target.isEmpty()) {
+            printError("Specify an image file to inspect.", json);
+            return 1;
+        }
+        QImageReader reader(target);
+        reader.setAutoTransform(true);
+        const QImage loaded = reader.read();
+        if (loaded.isNull()) {
+            printError("Could not read image: " + reader.errorString(), json);
+            return 1;
+        }
+        const QVariantMap meta = Inspector::readMetadata(QFileInfo(target).absoluteFilePath(), loaded);
+        if (json) {
+            QJsonObject obj = QJsonObject::fromVariantMap(meta);
+            obj.insert("ok", true);
+            printJson(obj);
+        } else {
+            QTextStream out(stdout);
+            out << meta.value("fileName").toString() << " (" << meta.value("format").toString() << ")\n";
+            out << "Dimensions: " << meta.value("width").toInt() << " x " << meta.value("height").toInt() << " px\n";
+            out << "Print @ 300 DPI: " << QString::number(meta.value("printWidthMm").toDouble(), 'f', 1)
+                << " x " << QString::number(meta.value("printHeightMm").toDouble(), 'f', 1) << " mm\n";
+            if (meta.value("hasExif").toBool()) {
+                if (meta.contains("camera")) out << "Camera: " << meta.value("camera").toString() << '\n';
+                if (meta.contains("dateTaken")) out << "Date Taken: " << meta.value("dateTaken").toString() << '\n';
+                if (meta.contains("exposureTime")) out << "Exposure: " << meta.value("exposureTime").toString() << '\n';
+                if (meta.contains("aperture")) out << "Aperture: " << meta.value("aperture").toString() << '\n';
+                if (meta.contains("iso")) out << "ISO: " << meta.value("iso").toString() << '\n';
+                if (meta.contains("focalLength")) out << "Focal Length: " << meta.value("focalLength").toString() << '\n';
+            }
+        }
         return 0;
     }
     if (cmd == "open") {

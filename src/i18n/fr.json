@@ -74,5 +74,14 @@
   "Default Settings": "Réglages par défaut",
   "Photo 4×6 Borderless": "Photo 4×6 sans bordure",
   "Black & White Draft": "Brouillon noir et blanc",
-  "4-Up Sheet with Cut Guides": "4 par feuille avec repères"
+  "4-Up Sheet with Cut Guides": "4 par feuille avec repères",
+  "Inspector": "Inspecteur",
+  "General": "Général",
+  "Camera (EXIF)": "Appareil photo (EXIF)",
+  "Rectangle": "Rectangle",
+  "Oval": "Ovale",
+  "Arrow": "Flèche",
+  "Line": "Ligne",
+  "Pixelate": "Pixelliser",
+  "Redact (Blackout)": "Masquer"
 }

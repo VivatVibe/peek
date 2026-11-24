@@ -9,6 +9,7 @@
 
 #include "backend.h"
 #include "cli.h"
+#include "markup.h"
 #include "portalfilepicker.h"
 #include "printrenderer.h"
 #include "theme.h"
@@ -21,7 +22,7 @@ int main(int argc, char *argv[]) {
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("peek");
-    app.setApplicationVersion("0.4.0");
+    app.setApplicationVersion("0.5.0");
 
     QStringList guiFiles;
     if (const auto exitCode = Cli::run(app.arguments(), guiFiles))
@@ -46,6 +47,7 @@ int main(int argc, char *argv[]) {
         backend.openFiles(guiFiles);
 
     qmlRegisterType<PrintPreviewItem>("Peek", 1, 0, "PrintPreview");
+    qmlRegisterType<MarkupDraftItem>("Peek", 1, 0, "MarkupDraft");
 
     QQmlApplicationEngine engine;
     engine.addImageProvider("peek", new PeekImageProvider(&backend));

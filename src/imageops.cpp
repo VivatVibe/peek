@@ -80,6 +80,8 @@ QImage applyEdits(const QImage &source, const EditState &state, bool grayscale) 
     }
     if (!state.color.isIdentity())
         img = applyColorAdjustments(img, state.color);
+    if (!state.annotations.isEmpty())
+        img = Markup::compositeAnnotations(img, state.annotations);
     if (grayscale)
         img = img.convertToFormat(QImage::Format_Grayscale8).convertToFormat(QImage::Format_ARGB32);
     return img;

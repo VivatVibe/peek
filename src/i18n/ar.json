@@ -112,5 +112,14 @@
   "Default Settings": "الإعدادات الافتراضية",
   "Photo 4×6 Borderless": "صورة 4×6 بلا حدود",
   "Black & White Draft": "مسودة أبيض وأسود",
-  "4-Up Sheet with Cut Guides": "4 صور في الورقة مع خطوط القص"
+  "4-Up Sheet with Cut Guides": "4 صور في الورقة مع خطوط القص",
+  "Inspector": "المعلومات",
+  "General": "عام",
+  "Camera (EXIF)": "الكاميرا (EXIF)",
+  "Rectangle": "مستطيل",
+  "Oval": "بيضاوي",
+  "Arrow": "سهم",
+  "Line": "خط",
+  "Pixelate": "تمويه",
+  "Redact (Blackout)": "حجب"
 }

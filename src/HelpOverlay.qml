@@ -19,6 +19,8 @@ Item {
         { key: "O / Ctrl+O", label: qsTr("Open Image") },
         { key: "Tab", label: qsTr("Toggle Thumbnail Sidebar") },
         { key: "S / Shift+Drag", label: qsTr("Select Region to Crop or Print") },
+        { key: "M", label: qsTr("Toggle Markup Toolbar") },
+        { key: "I", label: qsTr("Toggle Inspector (EXIF)") },
         { key: "Ctrl+K", label: qsTr("Crop to Selection") },
         { key: "Ctrl+C", label: qsTr("Copy Image or Selection") },
         { key: "Ctrl+Shift+R", label: qsTr("Adjust Size (Resize)") },

@@ -10,6 +10,8 @@ HEADERS += \
     ../src/cli.h \
     ../src/filepicker.h \
     ../src/imageops.h \
+    ../src/inspector.h \
+    ../src/markup.h \
     ../src/presetstore.h \
     ../src/printrenderer.h \
     ../src/theme.h \
@@ -20,6 +22,8 @@ SOURCES += \
     ../src/backend.cpp \
     ../src/cli.cpp \
     ../src/imageops.cpp \
+    ../src/inspector.cpp \
+    ../src/markup.cpp \
     ../src/presetstore.cpp \
     ../src/printrenderer.cpp \
     ../src/theme.cpp \

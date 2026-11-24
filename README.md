@@ -9,6 +9,8 @@ Fast image preview, quick editing, and effortless printing for Omarchy — inspi
   - **Crop & Copy (`S` / `Ctrl+K` / `Ctrl+C`)**: draw a selection with optional aspect-ratio presets (`Free`, `1:1`, `4:3`, `3:2`, `16:9`, `A4`), crop cleanly, or copy image/selection to the clipboard.
   - **Adjust Size (`Ctrl+Shift+R`)**: resize by pixels or percent with proportional lock and quick presets (`50%`, `75%`, `1920`, `1280`, `Original`).
   - **Adjust Color (`Ctrl+Shift+C`)**: live floating HUD for Exposure, Contrast, Saturation, Brightness, plus one-click **Auto Levels**.
+  - **Markup Toolbar (`M`)**: draw rectangles, ovals, arrows, lines, freehand sketches, text callouts placed under the pointer, pixelation mosaics, and solid redaction bars — painted by one shared C++ renderer so screen, clipboard, exported images, and printed PDFs match identically.
+  - **Image & EXIF Inspector (`I`)**: floating HUD showing dimensions, megapixels, 300 DPI print size, file size, and camera EXIF metadata (camera, lens, shutter, aperture, ISO, focal length).
   - **Export & Convert (`E` / `Ctrl+Shift+S`)**: convert to JPEG, PNG, WebP, TIFF, BMP, or PDF with quality slider and live estimated file size; saves atomically and asks before discarding unexported edits on quit (`Q`).
 - **macOS Preview–style print sheet (`Space` / `Ctrl+P`)**:
   - Live paper proof painted by the exact C++ renderer used for PDF/CUPS output.
@@ -30,6 +32,8 @@ Fast image preview, quick editing, and effortless printing for Omarchy — inspi
 | `O` / `Ctrl+O` | Open Image |
 | `Tab` | Toggle Thumbnail Sidebar |
 | `S` / `Shift+Drag` | Select Region to Crop or Print |
+| `M` | Toggle Markup Toolbar |
+| `I` | Toggle Inspector (EXIF) |
 | `Ctrl+K` | Crop to Selection |
 | `Ctrl+C` | Copy Image or Selection |
 | `Ctrl+Shift+R` | Adjust Size (Resize) |

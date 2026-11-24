@@ -42,6 +42,8 @@ class Backend : public QObject {
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY imageChanged)
     Q_PROPERTY(bool isTransformed READ isTransformed NOTIFY imageChanged)
     Q_PROPERTY(bool hasUnsavedEdits READ hasUnsavedEdits NOTIFY imageChanged)
+    Q_PROPERTY(int annotationCount READ annotationCount NOTIFY imageChanged)
+    Q_PROPERTY(QVariantMap metadata READ metadata NOTIFY imageChanged)
     Q_PROPERTY(int rotation READ rotation NOTIFY imageChanged)
 
     // Color adjustments (-1.0 .. +1.0).
@@ -131,6 +133,8 @@ public:
     bool canRedo() const { return !m_redoStack.isEmpty(); }
     bool isTransformed() const { return !m_edit.isIdentity(); }
     bool hasUnsavedEdits() const { return !m_edit.isIdentity() && m_editVersion != m_exportedEditVersion; }
+    int annotationCount() const { return m_edit.annotations.size(); }
+    QVariantMap metadata() const { return m_metadata; }
     int rotation() const { return m_edit.rotation; }
 
     double exposure() const { return m_edit.color.exposure; }
@@ -244,6 +248,10 @@ public:
     Q_INVOKABLE void autoLevels();
     Q_INVOKABLE void resetColorAdjustments();
 
+    Q_INVOKABLE void commitDraftAnnotation(QObject *draftItem);
+    Q_INVOKABLE void addTextAnnotation(double nx, double ny, const QString &text, const QColor &color, const QString &strokeSize);
+    Q_INVOKABLE void clearAnnotations();
+
     Q_INVOKABLE void rotateLeft();
     Q_INVOKABLE void rotateRight();
     Q_INVOKABLE void toggleFlipHorizontal();
@@ -319,6 +327,7 @@ private:
     QImage m_preColorImage;
     QImage m_displayImage;
     QSize m_preResizeSize;
+    QVariantMap m_metadata;
     mutable QHash<int, QImage> m_thumbCache;
     mutable QHash<QString, QImage> m_batchImageCache;
     int m_imageVersion = 0;

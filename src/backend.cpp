@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "inspector.h"
 
 #include <QClipboard>
 #include <QCollator>
@@ -872,6 +873,57 @@ void Backend::resetColorAdjustments() {
     applyEditState(next, true);
 }
 
+void Backend::commitDraftAnnotation(QObject *draftObj) {
+    auto *draft = qobject_cast<MarkupDraftItem *>(draftObj);
+    if (!draft || !hasImage() || !draft->active())
+        return;
+
+    const Annotation ann = draft->currentAnnotation();
+    draft->clear();
+
+    // Ignore accidental tiny taps except for pen dots.
+    if (ann.tool != "pen") {
+        const double dx = std::abs(ann.p2.x() - ann.p1.x()) * m_displayImage.width();
+        const double dy = std::abs(ann.p2.y() - ann.p1.y()) * m_displayImage.height();
+        if (std::hypot(dx, dy) < 6.0)
+            return;
+    } else if (ann.points.isEmpty()) {
+        return;
+    }
+
+    commitColorEdit();
+    EditState next = m_edit;
+    next.annotations.append(ann);
+    applyEditState(next, true);
+}
+
+void Backend::addTextAnnotation(double nx, double ny, const QString &text, const QColor &color, const QString &strokeSize) {
+    if (!hasImage() || text.trimmed().isEmpty())
+        return;
+    commitColorEdit();
+
+    Annotation ann;
+    ann.tool = "text";
+    ann.p1 = QPointF(std::clamp(nx, 0.0, 1.0), std::clamp(ny, 0.0, 1.0));
+    ann.p2 = ann.p1;
+    ann.text = text.trimmed();
+    ann.color = color.isValid() ? color : QColor("#ff453a");
+    ann.strokeFactor = Markup::strokeFactorForPreset(strokeSize);
+
+    EditState next = m_edit;
+    next.annotations.append(ann);
+    applyEditState(next, true);
+}
+
+void Backend::clearAnnotations() {
+    if (!hasImage() || m_edit.annotations.isEmpty())
+        return;
+    commitColorEdit();
+    EditState next = m_edit;
+    next.annotations.clear();
+    applyEditState(next, true);
+}
+
 void Backend::rotateLeft() {
     if (!hasImage())
         return;
@@ -1459,9 +1511,13 @@ void Backend::rebuildPreColorImage() {
 }
 
 void Backend::rebuildDisplayImageFromPreColor() {
-    m_displayImage = m_edit.color.isIdentity()
-                         ? m_preColorImage
-                         : ImageOps::applyColorAdjustments(m_preColorImage, m_edit.color);
+    QImage img = m_edit.color.isIdentity()
+                     ? m_preColorImage
+                     : ImageOps::applyColorAdjustments(m_preColorImage, m_edit.color);
+    if (!m_edit.annotations.isEmpty())
+        img = Markup::compositeAnnotations(img, m_edit.annotations);
+    m_displayImage = img;
+    m_metadata = Inspector::readMetadata(filePath(), m_displayImage);
     ++m_imageVersion;
     emit imageChanged();
 }

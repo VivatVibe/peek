@@ -1,9 +1,12 @@
 #pragma once
 
+#include "markup.h"
+
 #include <QImage>
 #include <QRect>
 #include <QSize>
 #include <QString>
+#include <QVector>
 #include <cmath>
 
 struct ColorAdjustments {
@@ -34,11 +37,12 @@ struct EditState {
     QRect cropRect;    // pixel rect in post-rotate/flip coordinates; empty = uncropped
     QSize resizeTarget; // target pixel size after crop; empty = native size
     ColorAdjustments color;
+    QVector<Annotation> annotations;
 
     bool isIdentity() const {
         return rotation == 0 && !flipH && !flipV &&
                cropRect.isEmpty() && resizeTarget.isEmpty() &&
-               color.isIdentity();
+               color.isIdentity() && annotations.isEmpty();
     }
 
     bool operator==(const EditState &other) const {
@@ -47,7 +51,8 @@ struct EditState {
                flipV == other.flipV &&
                cropRect == other.cropRect &&
                resizeTarget == other.resizeTarget &&
-               color == other.color;
+               color == other.color &&
+               annotations == other.annotations;
     }
 };
 

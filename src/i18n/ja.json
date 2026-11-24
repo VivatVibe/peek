@@ -73,5 +73,14 @@
   "Default Settings": "デフォルト設定",
   "Photo 4×6 Borderless": "写真 4×6 フチなし",
   "Black & White Draft": "白黒 ドラフト",
-  "4-Up Sheet with Cut Guides": "4枚割付（カット線付き）"
+  "4-Up Sheet with Cut Guides": "4枚割付（カット線付き）",
+  "Inspector": "インスペクタ",
+  "General": "一般",
+  "Camera (EXIF)": "カメラ (EXIF)",
+  "Rectangle": "長方形",
+  "Oval": "楕円",
+  "Arrow": "矢印",
+  "Line": "直線",
+  "Pixelate": "モザイク",
+  "Redact (Blackout)": "墨消し"
 }

@@ -80,5 +80,14 @@
   "Default Settings": "Standardeinstellungen",
   "Photo 4×6 Borderless": "Foto 4×6 randlos",
   "Black & White Draft": "Schwarzweiß-Entwurf",
-  "4-Up Sheet with Cut Guides": "4 pro Blatt mit Schnittlinien"
+  "4-Up Sheet with Cut Guides": "4 pro Blatt mit Schnittlinien",
+  "Inspector": "Informationen",
+  "General": "Allgemein",
+  "Camera (EXIF)": "Kamera (EXIF)",
+  "Rectangle": "Rechteck",
+  "Oval": "Oval",
+  "Arrow": "Pfeil",
+  "Line": "Linie",
+  "Pixelate": "Verpixeln",
+  "Redact (Blackout)": "Schwärzen"
 }

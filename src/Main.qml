@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import Peek 1.0
 
 ApplicationWindow {
     id: win
@@ -21,6 +22,11 @@ ApplicationWindow {
     property bool printVisible: false
     property bool resizeVisible: false
     property bool colorVisible: false
+    property bool inspectorVisible: false
+    property bool markupMode: false
+    property bool textCalloutOpen: false
+    property real textCalloutNormX: 0.5
+    property real textCalloutNormY: 0.5
     property bool exportVisible: false
     property bool quitConfirmVisible: false
     property bool sidebarVisible: false
@@ -29,6 +35,7 @@ ApplicationWindow {
     property bool showCheckerboard: false
 
     readonly property bool modalOpen: helpVisible || printVisible || resizeVisible || exportVisible || quitConfirmVisible
+    readonly property bool typingText: textCalloutOpen || printSheet.savingPreset || resizeVisible
 
     // Viewer zoom/pan state.
     property string zoomMode: "fit"
@@ -170,48 +177,53 @@ ApplicationWindow {
     }
 
     // Keyboard shortcuts.
-    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; enabled: !printSheet.savingPreset; onActivated: { const next = !win.helpVisible; win.closeAllModals(); win.helpVisible = next } }
-    Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !win.resizeVisible && !printSheet.savingPreset; onActivated: win.requestQuit() }
+    Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; enabled: !win.typingText; onActivated: { const next = !win.helpVisible; win.closeAllModals(); win.helpVisible = next } }
+    Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !win.typingText; onActivated: win.requestQuit() }
     Shortcut {
         sequence: "Escape"
         context: Qt.ApplicationShortcut
         onActivated: {
-            if (printSheet.savingPreset) printSheet.savingPreset = false
+            if (win.textCalloutOpen) win.textCalloutOpen = false
+            else if (printSheet.savingPreset) printSheet.savingPreset = false
             else if (win.modalOpen) win.closeAllModals()
             else if (win.colorVisible) { backend.commitColorEdit(); win.colorVisible = false }
+            else if (win.inspectorVisible) win.inspectorVisible = false
+            else if (win.markupMode) { markupDraft.clear(); win.markupMode = false }
             else if (backend.hasSelection) { backend.clearSelection(); win.selectMode = false }
             else if (win.selectMode) win.selectMode = false
             else if (backend.errorMessage.length > 0) backend.clearMessages()
         }
     }
-    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.modalOpen; onActivated: win.openPrintSheet() }
-    Shortcut { sequences: [StandardKey.Print, "P"]; context: Qt.ApplicationShortcut; enabled: !win.helpVisible && !win.resizeVisible && !win.exportVisible && !printSheet.savingPreset; onActivated: { if (win.printVisible) win.printVisible = false; else win.openPrintSheet() } }
+    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.modalOpen && !win.typingText; onActivated: win.openPrintSheet() }
+    Shortcut { sequences: [StandardKey.Print, "P"]; context: Qt.ApplicationShortcut; enabled: !win.helpVisible && !win.resizeVisible && !win.exportVisible && !win.typingText; onActivated: { if (win.printVisible) win.printVisible = false; else win.openPrintSheet() } }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && !printSheet.savingPreset && !backend.printBusy && backend.printer.length > 0; onActivated: { backend.printCurrent(); win.printVisible = false } }
-    Shortcut { sequences: [StandardKey.Open, "O"]; context: Qt.ApplicationShortcut; enabled: !win.modalOpen; onActivated: backend.openFileDialog() }
+    Shortcut { sequences: [StandardKey.Open, "O"]; context: Qt.ApplicationShortcut; enabled: !win.modalOpen && !win.typingText; onActivated: backend.openFileDialog() }
     Shortcut { sequences: [StandardKey.Save]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.helpVisible && !win.resizeVisible; onActivated: backend.savePdfDialog() }
-    Shortcut { sequences: ["Ctrl+Shift+S", "E"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.openExportSheet() }
-    Shortcut { sequence: "Ctrl+Shift+R"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: { win.closeAllModals(); win.resizeVisible = true } }
-    Shortcut { sequence: "Ctrl+Shift+C"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.colorVisible = !win.colorVisible }
-    Shortcut { sequence: "Ctrl+K"; context: Qt.ApplicationShortcut; enabled: backend.hasSelection && !win.modalOpen; onActivated: { backend.cropToSelection(); win.selectMode = false; win.resetView() } }
-    Shortcut { sequences: [StandardKey.Copy]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: backend.copyToClipboard() }
-    Shortcut { sequence: "Tab"; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen; onActivated: win.sidebarVisible = !win.sidebarVisible }
-    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.selectMode = !win.selectMode }
-    Shortcut { sequences: [StandardKey.SelectAll]; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen; onActivated: { win.sidebarVisible = true; backend.selectAllFiles() } }
+    Shortcut { sequences: ["Ctrl+Shift+S", "E"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: win.openExportSheet() }
+    Shortcut { sequence: "Ctrl+Shift+R"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.closeAllModals(); win.resizeVisible = true } }
+    Shortcut { sequence: "Ctrl+Shift+C"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.inspectorVisible = false; win.colorVisible = !win.colorVisible } }
+    Shortcut { sequence: "M"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.selectMode = false; win.markupMode = !win.markupMode } }
+    Shortcut { sequence: "I"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.colorVisible = false; win.inspectorVisible = !win.inspectorVisible } }
+    Shortcut { sequence: "Ctrl+K"; context: Qt.ApplicationShortcut; enabled: backend.hasSelection && !win.modalOpen && !win.typingText; onActivated: { backend.cropToSelection(); win.selectMode = false; win.resetView() } }
+    Shortcut { sequences: [StandardKey.Copy]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: backend.copyToClipboard() }
+    Shortcut { sequence: "Tab"; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen && !win.typingText; onActivated: win.sidebarVisible = !win.sidebarVisible }
+    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.markupMode = false; win.selectMode = !win.selectMode } }
+    Shortcut { sequences: [StandardKey.SelectAll]; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen && !win.typingText; onActivated: { win.sidebarVisible = true; backend.selectAllFiles() } }
     Shortcut { sequences: ["PgDown"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && backend.previewPageCount > 1; onActivated: backend.nextPreviewPage() }
     Shortcut { sequences: ["PgUp"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && backend.previewPageCount > 1; onActivated: backend.previousPreviewPage() }
-    Shortcut { sequences: ["Right", "L"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: { win.resetView(); backend.nextImage() } }
-    Shortcut { sequences: ["Left", "H"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: { win.resetView(); backend.previousImage() } }
-    Shortcut { sequences: ["+", "="]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.zoomBy(1.25) }
-    Shortcut { sequence: "-"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.zoomBy(0.8) }
-    Shortcut { sequences: ["0", "F"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.resetView() }
-    Shortcut { sequence: "1"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.setActualSize() }
-    Shortcut { sequences: ["[", "Ctrl+L"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: backend.rotateLeft() }
-    Shortcut { sequences: ["]", "Ctrl+R"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: backend.rotateRight() }
-    Shortcut { sequence: "Shift+H"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: backend.toggleFlipHorizontal() }
-    Shortcut { sequence: "Shift+V"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: backend.toggleFlipVertical() }
-    Shortcut { sequences: [StandardKey.Undo]; context: Qt.ApplicationShortcut; enabled: backend.canUndo && !win.modalOpen; onActivated: backend.undo() }
-    Shortcut { sequences: [StandardKey.Redo]; context: Qt.ApplicationShortcut; enabled: backend.canRedo && !win.modalOpen; onActivated: backend.redo() }
-    Shortcut { sequence: "T"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen; onActivated: win.showCheckerboard = !win.showCheckerboard }
+    Shortcut { sequences: ["Right", "L"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.resetView(); backend.nextImage() } }
+    Shortcut { sequences: ["Left", "H"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.resetView(); backend.previousImage() } }
+    Shortcut { sequences: ["+", "="]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: win.zoomBy(1.25) }
+    Shortcut { sequence: "-"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: win.zoomBy(0.8) }
+    Shortcut { sequences: ["0", "F"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: win.resetView() }
+    Shortcut { sequence: "1"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: win.setActualSize() }
+    Shortcut { sequences: ["[", "Ctrl+L"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: backend.rotateLeft() }
+    Shortcut { sequences: ["]", "Ctrl+R"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: backend.rotateRight() }
+    Shortcut { sequence: "Shift+H"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: backend.toggleFlipHorizontal() }
+    Shortcut { sequence: "Shift+V"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: backend.toggleFlipVertical() }
+    Shortcut { sequences: [StandardKey.Undo]; context: Qt.ApplicationShortcut; enabled: backend.canUndo && !win.modalOpen && !win.typingText; onActivated: backend.undo() }
+    Shortcut { sequences: [StandardKey.Redo]; context: Qt.ApplicationShortcut; enabled: backend.canRedo && !win.modalOpen && !win.typingText; onActivated: backend.redo() }
+    Shortcut { sequence: "T"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: win.showCheckerboard = !win.showCheckerboard }
 
     // Right-to-left languages mirror the window; Translator sets layoutDirection.
     Item {
@@ -392,13 +404,14 @@ ApplicationWindow {
                             id: panArea
                             anchors.fill: parent
                             acceptedButtons: Qt.LeftButton
-                            cursorShape: (win.selectMode || win.draggingSelection)
+                            cursorShape: (win.markupMode || win.selectMode || win.draggingSelection)
                                          ? Qt.CrossCursor
                                          : (pressed ? Qt.ClosedHandCursor : (win.zoomMode === "manual" ? Qt.OpenHandCursor : Qt.ArrowCursor))
 
                             property real lastX: 0
                             property real lastY: 0
                             property bool isSelectingDrag: false
+                            property bool isMarkupDrag: false
 
                             function toImageNormX(px) {
                                 return Math.max(0.0, Math.min(1.0, (px - imageFrame.x) / Math.max(1.0, imageFrame.width)))
@@ -410,22 +423,40 @@ ApplicationWindow {
                             onPressed: function(mouse) {
                                 lastX = mouse.x
                                 lastY = mouse.y
-                                if (win.selectMode || (mouse.modifiers & Qt.ShiftModifier)) {
+                                isSelectingDrag = false
+                                isMarkupDrag = false
+
+                                if (win.markupMode) {
+                                    const nx = toImageNormX(mouse.x)
+                                    const ny = toImageNormY(mouse.y)
+                                    if (markupBar.currentTool === "text") {
+                                        // Place text callout right under the pointer.
+                                        win.textCalloutNormX = nx
+                                        win.textCalloutNormY = ny
+                                        calloutInput.text = ""
+                                        win.textCalloutOpen = true
+                                        calloutInput.forceActiveFocus()
+                                    } else {
+                                        win.textCalloutOpen = false
+                                        isMarkupDrag = true
+                                        markupDraft.beginStroke(nx, ny)
+                                    }
+                                } else if (win.selectMode || (mouse.modifiers & Qt.ShiftModifier)) {
                                     isSelectingDrag = true
                                     win.draggingSelection = true
                                     win.dragStartNormX = toImageNormX(mouse.x)
                                     win.dragStartNormY = toImageNormY(mouse.y)
                                     win.dragCurNormX = win.dragStartNormX
                                     win.dragCurNormY = win.dragStartNormY
-                                } else {
-                                    isSelectingDrag = false
                                 }
                             }
 
                             onPositionChanged: function(mouse) {
                                 if (!pressed || !backend.hasImage)
                                     return
-                                if (isSelectingDrag) {
+                                if (isMarkupDrag) {
+                                    markupDraft.updateStroke(toImageNormX(mouse.x), toImageNormY(mouse.y))
+                                } else if (isSelectingDrag) {
                                     let nx = toImageNormX(mouse.x)
                                     let ny = toImageNormY(mouse.y)
                                     const ratio = win.aspectRatioValue(win.aspectPreset)
@@ -448,7 +479,10 @@ ApplicationWindow {
                             }
 
                             onReleased: {
-                                if (isSelectingDrag) {
+                                if (isMarkupDrag) {
+                                    isMarkupDrag = false
+                                    backend.commitDraftAnnotation(markupDraft)
+                                } else if (isSelectingDrag) {
                                     isSelectingDrag = false
                                     win.draggingSelection = false
                                     const x = Math.min(win.dragStartNormX, win.dragCurNormX)
@@ -460,7 +494,7 @@ ApplicationWindow {
                             }
 
                             onDoubleClicked: {
-                                if (win.selectMode)
+                                if (win.selectMode || win.markupMode)
                                     return
                                 if (win.zoomMode === "fit")
                                     win.setActualSize()
@@ -471,6 +505,88 @@ ApplicationWindow {
                             onWheel: function(wheel) {
                                 const factor = wheel.angleDelta.y > 0 ? 1.15 : (1.0 / 1.15)
                                 win.zoomBy(factor, wheel.x, wheel.y)
+                            }
+                        }
+
+                        // Live C++ draft overlay while drawing annotations.
+                        MarkupDraft {
+                            id: markupDraft
+                            x: imageFrame.x
+                            y: imageFrame.y
+                            width: imageFrame.width
+                            height: imageFrame.height
+                            tool: markupBar.currentTool
+                            color: markupBar.currentColor
+                            strokeSize: markupBar.strokeSize
+                        }
+
+                        // Inline text callout box placed right where the user clicked.
+                        Rectangle {
+                            visible: win.textCalloutOpen
+                            x: Math.max(12, Math.min(canvasArea.width - width - 12, imageFrame.x + win.textCalloutNormX * imageFrame.width - 20))
+                            y: Math.max(60, Math.min(canvasArea.height - height - 16, imageFrame.y + win.textCalloutNormY * imageFrame.height - 18))
+                            width: 240
+                            height: 36
+                            radius: Math.min(4, theme.radius)
+                            color: "#f016161d"
+                            border.color: theme.accent
+                            border.width: 2
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 6
+                                spacing: 6
+
+                                TextInput {
+                                    id: calloutInput
+                                    Layout.fillWidth: true
+                                    color: "#f4f4f6"
+                                    font.pixelSize: 13
+                                    clip: true
+                                    onAccepted: {
+                                        if (text.trim().length > 0)
+                                            backend.addTextAnnotation(win.textCalloutNormX, win.textCalloutNormY, text, markupBar.currentColor, markupBar.strokeSize)
+                                        win.textCalloutOpen = false
+                                    }
+                                    Text {
+                                        anchors.fill: parent
+                                        verticalAlignment: Text.AlignVCenter
+                                        visible: !calloutInput.text
+                                        text: qsTr("Type annotation…")
+                                        color: "#7a7a88"
+                                        font.pixelSize: 12
+                                    }
+                                }
+
+                                Text {
+                                    text: "↵"
+                                    color: theme.accent
+                                    font.pixelSize: 14
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (calloutInput.text.trim().length > 0)
+                                                backend.addTextAnnotation(win.textCalloutNormX, win.textCalloutNormY, calloutInput.text, markupBar.currentColor, markupBar.strokeSize)
+                                            win.textCalloutOpen = false
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Floating Markup Toolbar docked at top-center.
+                        MarkupBar {
+                            id: markupBar
+                            visible: win.markupMode && backend.hasImage && !win.modalOpen
+                            anchors.top: parent.top
+                            anchors.topMargin: 12
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            onCloseRequested: {
+                                win.textCalloutOpen = false
+                                markupDraft.clear()
+                                win.markupMode = false
                             }
                         }
 
@@ -656,14 +772,25 @@ ApplicationWindow {
                         ColorSheet {
                             visible: win.colorVisible && backend.hasImage && !win.modalOpen
                             anchors.top: parent.top
+                            anchors.topMargin: win.markupMode ? 64 : 14
                             anchors.right: parent.right
-                            anchors.margins: 14
+                            anchors.rightMargin: 14
                             onCloseRequested: win.colorVisible = false
+                        }
+
+                        // Floating Inspector HUD on right edge of canvas.
+                        InspectorSheet {
+                            visible: win.inspectorVisible && backend.hasImage && !win.modalOpen
+                            anchors.top: parent.top
+                            anchors.topMargin: win.markupMode ? 64 : 14
+                            anchors.right: parent.right
+                            anchors.rightMargin: 14
+                            onCloseRequested: win.inspectorVisible = false
                         }
 
                         // Subtle previous / next navigation buttons.
                         Rectangle {
-                            visible: backend.imageCount > 1 && !win.selectMode && (pointerTracker.hovered || prevMa.containsMouse)
+                            visible: backend.imageCount > 1 && !win.selectMode && !win.markupMode && (pointerTracker.hovered || prevMa.containsMouse)
                             anchors.left: parent.left
                             anchors.leftMargin: 16
                             anchors.verticalCenter: parent.verticalCenter
@@ -691,7 +818,7 @@ ApplicationWindow {
                         }
 
                         Rectangle {
-                            visible: backend.imageCount > 1 && !win.selectMode && !win.colorVisible && (pointerTracker.hovered || nextMa.containsMouse)
+                            visible: backend.imageCount > 1 && !win.selectMode && !win.markupMode && !win.colorVisible && !win.inspectorVisible && (pointerTracker.hovered || nextMa.containsMouse)
                             anchors.right: parent.right
                             anchors.rightMargin: 16
                             anchors.verticalCenter: parent.verticalCenter
@@ -867,7 +994,19 @@ ApplicationWindow {
                             Material.accent: theme.accent
                             ToolTip.visible: hovered
                             ToolTip.text: qsTr("Select / Crop (S)")
-                            onClicked: win.selectMode = !win.selectMode
+                            onClicked: { win.markupMode = false; win.selectMode = !win.selectMode }
+                        }
+
+                        ToolButton {
+                            Material.roundedScale: Math.min(4, theme.radius)
+                            implicitWidth: 34; implicitHeight: 34
+                            text: "✎"
+                            font.pixelSize: 15
+                            highlighted: win.markupMode || backend.annotationCount > 0
+                            Material.accent: theme.accent
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Markup Toolbar (M)")
+                            onClicked: { win.selectMode = false; win.markupMode = !win.markupMode }
                         }
 
                         ToolButton {
@@ -889,7 +1028,19 @@ ApplicationWindow {
                             Material.accent: theme.accent
                             ToolTip.visible: hovered
                             ToolTip.text: qsTr("Adjust Color (Ctrl+Shift+C)")
-                            onClicked: win.colorVisible = !win.colorVisible
+                            onClicked: { win.inspectorVisible = false; win.colorVisible = !win.colorVisible }
+                        }
+
+                        ToolButton {
+                            Material.roundedScale: Math.min(4, theme.radius)
+                            implicitWidth: 34; implicitHeight: 34
+                            text: "ⓘ"
+                            font.pixelSize: 15
+                            highlighted: win.inspectorVisible
+                            Material.accent: theme.accent
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Inspector (I)")
+                            onClicked: { win.colorVisible = false; win.inspectorVisible = !win.inspectorVisible }
                         }
 
                         ToolButton {
