@@ -28,7 +28,7 @@ struct PrintSettings {
     QString marginMode = "standard"; // standard | narrow | borderless
     bool grayscale = false;
     int copies = 1;
-    int perPage = 1;                 // 1 | 2 | 4 | 6 | 9
+    int perPage = 1;                 // 1 | 2 | 4 | 6 | 9 | 12 | 16
     bool cutGuides = false;          // dashed trim guides between cells when perPage > 1
 
     // Optional CUPS PPD overrides discovered via lpoptions -l.

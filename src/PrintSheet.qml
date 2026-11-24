@@ -681,7 +681,9 @@ Item {
                                     { value: "2", label: "2" },
                                     { value: "4", label: "4" },
                                     { value: "6", label: "6" },
-                                    { value: "9", label: "9" }
+                                    { value: "9", label: "9" },
+                                    { value: "12", label: "12" },
+                                    { value: "16", label: "16" }
                                 ]
                                 onSelected: function(val) { backend.perPage = parseInt(val, 10) }
                             }

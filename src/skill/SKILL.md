@@ -35,6 +35,6 @@ description: >
 - `--fit fit|fill|scale` (default: `fit`)
 - `--scale <10-200>`
 - `--margins standard|narrow|borderless` (default: `standard`)
-- `--per-page 1|2|4|6|9`
+- `--per-page 1|2|4|6|9|12|16`
 - `--cut-guides`
 - `--grayscale`

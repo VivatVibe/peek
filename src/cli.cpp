@@ -66,7 +66,7 @@ void printUsage() {
         << "  --fit fit|fill|scale\n"
         << "  --scale <10-200>\n"
         << "  --margins standard|narrow|borderless\n"
-        << "  --per-page 1|2|4|6|9                 Images per sheet\n"
+        << "  --per-page 1|2|4|6|9|12|16           Images per sheet\n"
         << "  --cut-guides                         Draw dashed trim guides\n"
         << "  --grayscale\n";
 }
@@ -252,8 +252,8 @@ bool parseJobOptions(const QStringList &args, CliJobOptions &opts, QString &erro
             if (!requireValue(v)) return false;
             bool ok = false;
             const int n = v.toInt(&ok);
-            if (!ok || (n != 1 && n != 2 && n != 4 && n != 6 && n != 9)) {
-                error = "Per-page must be 1, 2, 4, 6, or 9.";
+            if (!ok || (n != 1 && n != 2 && n != 4 && n != 6 && n != 9 && n != 12 && n != 16)) {
+                error = "Per-page must be 1, 2, 4, 6, 9, 12, or 16.";
                 return false;
             }
             opts.print.perPage = n;

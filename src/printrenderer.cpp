@@ -42,6 +42,8 @@ int normalizePerPage(int perPage) {
     case 4:
     case 6:
     case 9:
+    case 12:
+    case 16:
         return perPage;
     default:
         return 1;
@@ -57,10 +59,13 @@ double marginMm(const QString &marginMode) {
 }
 
 double cellGapMm(const PrintSettings &settings) {
-    if (normalizePerPage(settings.perPage) <= 1)
+    const int n = normalizePerPage(settings.perPage);
+    if (n <= 1)
         return 0.0;
     if (settings.marginMode == "borderless")
         return 0.0;
+    if (n >= 12)
+        return settings.marginMode == "narrow" ? 1.5 : 2.5;
     if (settings.marginMode == "narrow")
         return 2.5;
     return 4.0;
@@ -91,6 +96,10 @@ QPair<int, int> gridForPerPage(int perPage, bool landscape) {
         return landscape ? qMakePair(3, 2) : qMakePair(2, 3);
     case 9:
         return qMakePair(3, 3);
+    case 12:
+        return landscape ? qMakePair(4, 3) : qMakePair(3, 4);
+    case 16:
+        return qMakePair(4, 4);
     default:
         return qMakePair(1, 1);
     }

@@ -219,6 +219,9 @@ private slots:
         QCOMPARE(PrintRenderer::gridForPerPage(6, true), qMakePair(3, 2));
         QCOMPARE(PrintRenderer::gridForPerPage(6, false), qMakePair(2, 3));
         QCOMPARE(PrintRenderer::gridForPerPage(9, false), qMakePair(3, 3));
+        QCOMPARE(PrintRenderer::gridForPerPage(12, true), qMakePair(4, 3));
+        QCOMPARE(PrintRenderer::gridForPerPage(12, false), qMakePair(3, 4));
+        QCOMPARE(PrintRenderer::gridForPerPage(16, true), qMakePair(4, 4));
 
         const QVector<QRectF> cells = PrintRenderer::computeGridCellRects(QRectF(10, 10, 210, 210), 2, 2, 10, 10);
         QCOMPARE(cells.size(), 4);
@@ -227,9 +230,9 @@ private slots:
 
         QImage a(100, 100, QImage::Format_ARGB32);
         a.fill(Qt::red);
-        const auto repeated = PrintRenderer::paginateImages({a}, 4, true);
+        const auto repeated = PrintRenderer::paginateImages({a}, 16, true);
         QCOMPARE(repeated.size(), 1);
-        QCOMPARE(repeated.first().size(), 4);
+        QCOMPARE(repeated.first().size(), 16);
 
         QVector<QImage> five(5, a);
         const auto batched = PrintRenderer::paginateImages(five, 4, false);
