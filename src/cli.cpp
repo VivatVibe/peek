@@ -378,7 +378,7 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
     }
     if (cmd == "--version" || cmd == "-v") {
         QTextStream out(stdout);
-        out << "omarchy-preview 0.7.0\n";
+        out << "omarchy-preview 0.7.1\n";
         return 0;
     }
     if (cmd == "search") {

@@ -1,6 +1,6 @@
 pkgname=omarchy-preview
-pkgver=0.7.0
-pkgrel=6
+pkgver=0.7.1
+pkgrel=1
 pkgdesc='Fast image & PDF preview and effortless printing for Omarchy'
 arch=('x86_64' 'aarch64')
 url='https://github.com/VivatVibe/omarchy-preview'

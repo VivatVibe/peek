@@ -89,7 +89,7 @@ omarchy-preview skill install
 Download the latest `.pkg.tar.zst` from [GitHub Releases](https://github.com/VivatVibe/omarchy-preview/releases/latest) and install it with `pacman`:
 
 ```sh
-sudo pacman -U omarchy-preview-0.7.0-5-x86_64.pkg.tar.zst
+sudo pacman -U omarchy-preview-0.7.1-1-x86_64.pkg.tar.zst
 ```
 
 ### Build from Source
