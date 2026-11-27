@@ -1,203 +1,159 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Omarchy Preview</title>
+  <desc>A modern dark squircle icon for Hyprland inspired by macOS Preview: layered document and luminous geometric mountain photo card with a sleek frosted-glass magnifying loupe.</desc>
   <defs>
-    <!-- Soft ambient shadows with generous filter regions so nothing clips -->
-    <filter id="backSheetShadow" x="-25%" y="-25%" width="150%" height="150%">
-      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.24"/>
-    </filter>
-    <filter id="cardShadow" x="-25%" y="-25%" width="150%" height="150%">
-      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#000000" flood-opacity="0.34"/>
-    </filter>
-    <filter id="loupeShadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="3" dy="12" stdDeviation="11" flood-color="#000000" flood-opacity="0.40"/>
-    </filter>
+    <!-- Sleek dark Hyprland / Omarchy squircle base -->
+    <linearGradient id="appBg" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#1e2230"/>
+      <stop offset="55%" stop-color="#131620"/>
+      <stop offset="100%" stop-color="#0b0d14"/>
+    </linearGradient>
+    <radialGradient id="ambientGlow" cx="0.32" cy="0.28" r="0.65">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.22"/>
+      <stop offset="55%" stop-color="#6366f1" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#0b0d14" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="appBorder" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="50%" stop-color="#94a3b8" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.24"/>
+    </linearGradient>
 
-    <!-- Paper & Polaroid frame gradients -->
-    <linearGradient id="backPaper" x1="0" y1="0" x2="1" y2="1">
+    <!-- Back stacked PDF/document card -->
+    <linearGradient id="backCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+
+    <!-- Photo card frame & luminous geometric mountain scene -->
+    <linearGradient id="cardFrame" x1="0" y1="0" x2="0.4" y2="1">
       <stop offset="0%" stop-color="#f8fafc"/>
-      <stop offset="100%" stop-color="#dbe4ee"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
     </linearGradient>
-    <linearGradient id="polaroidFrame" x1="0" y1="0" x2="0.25" y2="1">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="70%" stop-color="#f8fafc"/>
-      <stop offset="100%" stop-color="#e5ebf2"/>
+    <linearGradient id="skyScene" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="32%" stop-color="#1d4ed8"/>
+      <stop offset="68%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+    <radialGradient id="sunOrb" cx="0.32" cy="0.32" r="0.42">
+      <stop offset="0%" stop-color="#fef3c7"/>
+      <stop offset="38%" stop-color="#7dd3fc" stop-opacity="0.65"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="peakBack" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="peakFront" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="55%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#0c192c"/>
+    </linearGradient>
+    <linearGradient id="peakHighlight" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a5f3fc" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
     </linearGradient>
 
-    <!-- Photo scene gradients (vivid macOS Preview coastal/mountain vibe) -->
-    <linearGradient id="skyGrad" x1="0" y1="0" x2="0.12" y2="1">
-      <stop offset="0%" stop-color="#0369a1"/>
-      <stop offset="35%" stop-color="#0ea5e9"/>
-      <stop offset="72%" stop-color="#7dd3fc"/>
-      <stop offset="100%" stop-color="#fef3c7"/>
-    </linearGradient>
-    <radialGradient id="sunGlow" cx="0.27" cy="0.30" r="0.44">
-      <stop offset="0%" stop-color="#fffbeb" stop-opacity="0.98"/>
-      <stop offset="28%" stop-color="#fde68a" stop-opacity="0.72"/>
-      <stop offset="65%" stop-color="#fdba74" stop-opacity="0.20"/>
-      <stop offset="100%" stop-color="#fdba74" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="farMountain" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#3b82f6"/>
-      <stop offset="100%" stop-color="#1e3a8a"/>
-    </linearGradient>
-    <linearGradient id="midMountain" x1="0.2" y1="0" x2="0.8" y2="1">
-      <stop offset="0%" stop-color="#0d9488"/>
-      <stop offset="52%" stop-color="#0f766e"/>
-      <stop offset="100%" stop-color="#134e4a"/>
-    </linearGradient>
-    <linearGradient id="nearSlope" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#5eead4"/>
-      <stop offset="48%" stop-color="#14b8a6"/>
-      <stop offset="100%" stop-color="#0f766e"/>
-    </linearGradient>
-    <linearGradient id="oceanGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#06b6d4"/>
-      <stop offset="45%" stop-color="#0284c7"/>
-      <stop offset="100%" stop-color="#0c4a6e"/>
-    </linearGradient>
-    <linearGradient id="beachSand" x1="0" y1="0" x2="1" y2="0.4">
-      <stop offset="0%" stop-color="#fef08a"/>
-      <stop offset="55%" stop-color="#fcd34d"/>
-      <stop offset="100%" stop-color="#f59e0b"/>
-    </linearGradient>
-
-    <!-- Magnifying glass metallic & glass gradients -->
-    <linearGradient id="bezelOuter" x1="0" y1="0" x2="1" y2="1">
+    <!-- Modern minimalist magnifying glass loupe -->
+    <linearGradient id="loupeRing" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="22%" stop-color="#cbd5e1"/>
-      <stop offset="50%" stop-color="#f8fafc"/>
-      <stop offset="78%" stop-color="#64748b"/>
-      <stop offset="100%" stop-color="#e2e8f0"/>
+      <stop offset="48%" stop-color="#bae6fd"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
     </linearGradient>
-    <linearGradient id="bezelRimStroke" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#475569"/>
-      <stop offset="50%" stop-color="#94a3b8"/>
-      <stop offset="100%" stop-color="#1e293b"/>
+    <linearGradient id="loupeHandle" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="100%" stop-color="#0284c7"/>
     </linearGradient>
-    <linearGradient id="bezelInner" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#334155"/>
-      <stop offset="45%" stop-color="#e2e8f0"/>
-      <stop offset="100%" stop-color="#ffffff"/>
-    </linearGradient>
-    <radialGradient id="glassTint" cx="0.38" cy="0.34" r="0.68">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.24"/>
-      <stop offset="56%" stop-color="#e0f2fe" stop-opacity="0.14"/>
-      <stop offset="86%" stop-color="#38bdf8" stop-opacity="0.28"/>
-      <stop offset="100%" stop-color="#0284c7" stop-opacity="0.44"/>
+    <radialGradient id="lensGlass" cx="0.35" cy="0.30" r="0.72">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.34"/>
+      <stop offset="55%" stop-color="#7dd3fc" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0.36"/>
     </radialGradient>
-    <linearGradient id="glassGlare" x1="0" y1="0" x2="0.6" y2="1">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.82"/>
-      <stop offset="55%" stop-color="#ffffff" stop-opacity="0.24"/>
+    <linearGradient id="lensSheen" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.72"/>
       <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
-    <linearGradient id="ferruleGrad" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#64748b"/>
-      <stop offset="32%" stop-color="#f8fafc"/>
-      <stop offset="65%" stop-color="#cbd5e1"/>
-      <stop offset="100%" stop-color="#475569"/>
-    </linearGradient>
-    <linearGradient id="handleGrad" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#1e293b"/>
-      <stop offset="28%" stop-color="#475569"/>
-      <stop offset="52%" stop-color="#1e293b"/>
-      <stop offset="100%" stop-color="#090d16"/>
-    </linearGradient>
 
-    <!-- Clip paths -->
-    <clipPath id="photoClip">
-      <rect x="82" y="84" width="292" height="278" rx="10"/>
+    <filter id="softDrop" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#000000" flood-opacity="0.52"/>
+    </filter>
+    <filter id="loupeDrop" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#020617" flood-opacity="0.65"/>
+    </filter>
+
+    <clipPath id="sceneClip">
+      <rect x="108" y="122" width="234" height="200" rx="16"/>
     </clipPath>
     <clipPath id="lensClip">
-      <circle cx="304" cy="296" r="93"/>
+      <circle cx="310" cy="302" r="76"/>
     </clipPath>
   </defs>
 
-  <!-- Back stacked document/PDF sheet (subtle tilt right) -->
-  <g transform="rotate(7 260 226)" filter="url(#backSheetShadow)">
-    <rect x="118" y="52" width="290" height="350" rx="22" fill="url(#backPaper)" stroke="#cbd5e1" stroke-width="2"/>
-    <!-- Subtle document header & lines peeking out at top-right -->
-    <rect x="278" y="86" width="96" height="12" rx="6" fill="#94a3b8" opacity="0.55"/>
-    <rect x="278" y="110" width="84" height="8" rx="4" fill="#cbd5e1"/>
-    <rect x="278" y="128" width="92" height="8" rx="4" fill="#cbd5e1"/>
-    <rect x="278" y="146" width="70" height="8" rx="4" fill="#cbd5e1"/>
+  <!-- App squircle base (matches Omarchy/Hyprland modern icon geometry) -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#appBg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#ambientGlow)"/>
+  <rect x="18" y="18" width="476" height="476" rx="110" fill="none" stroke="url(#appBorder)" stroke-width="4"/>
+
+  <!-- Stacked accent sheet behind (signals multi-page PDF / document preview, like Hype's stack) -->
+  <g transform="rotate(8 260 220)">
+    <rect x="150" y="96" width="244" height="284" rx="28" fill="#090b12" opacity="0.55" transform="translate(0 10)"/>
+    <rect x="150" y="96" width="244" height="284" rx="28" fill="url(#backCard)"/>
+    <!-- Subtle document indicator bars peeking top-right -->
+    <rect x="304" y="126" width="60" height="10" rx="5" fill="#e0e7ff" opacity="0.72"/>
+    <rect x="316" y="148" width="48" height="8" rx="4" fill="#c7d2fe" opacity="0.52"/>
   </g>
 
-  <!-- Primary Polaroid / Postcard photo (iconic macOS Preview tilt left) -->
-  <g transform="rotate(-6 228 244)" filter="url(#cardShadow)">
-    <rect x="58" y="60" width="340" height="368" rx="24" fill="url(#polaroidFrame)" stroke="#cbd5e1" stroke-width="2"/>
+  <!-- Main tilted Preview photo card -->
+  <g transform="rotate(-6 226 244)" filter="url(#softDrop)">
+    <rect x="90" y="104" width="270" height="282" rx="28" fill="url(#cardFrame)"/>
 
-    <!-- Vivid scenic coastal landscape photo -->
-    <g clip-path="url(#photoClip)">
-      <!-- Sky -->
-      <rect x="82" y="84" width="292" height="278" fill="url(#skyGrad)"/>
-      <!-- Sun & warm atmospheric glow -->
-      <rect x="82" y="84" width="292" height="278" fill="url(#sunGlow)"/>
-      <circle cx="158" cy="154" r="24" fill="#fffbeb" opacity="0.96"/>
+    <!-- Geometric luminous landscape inside frame -->
+    <g clip-path="url(#sceneClip)">
+      <rect x="108" y="122" width="234" height="200" fill="url(#skyScene)"/>
+      <rect x="108" y="122" width="234" height="200" fill="url(#sunOrb)"/>
+      <!-- Crisp luminous moon/sun orb -->
+      <circle cx="176" cy="178" r="22" fill="#fef3c7"/>
 
-      <!-- Soft sunlit clouds -->
-      <g fill="#ffffff" opacity="0.78">
-        <path d="M214 146 C214 137 224 132 234 134 C240 124 256 120 270 126 C282 122 298 128 300 138 C308 140 310 150 298 152 L222 152 C215 152 214 149 214 146 Z"/>
-        <ellipse cx="120" cy="192" rx="34" ry="8" opacity="0.52"/>
-      </g>
+      <!-- Geometric Hyprland-style layered alpine peaks -->
+      <path d="M98 326 L186 218 L244 268 L296 206 L354 274 L354 326 Z" fill="url(#peakBack)"/>
+      <path d="M98 326 L158 248 L218 292 L268 236 L354 326 Z" fill="url(#peakFront)"/>
+      <!-- Clean geometric light facet on front peak -->
+      <path d="M158 248 L178 326 L98 326 Z" fill="url(#peakHighlight)" opacity="0.38"/>
+      <path d="M268 236 L296 326 L218 292 Z" fill="url(#peakHighlight)" opacity="0.32"/>
 
-      <!-- Distant atmospheric mountains -->
-      <path d="M74 266 L142 188 L198 228 L268 166 L348 226 L382 202 L382 284 L74 284 Z" fill="url(#farMountain)" opacity="0.86"/>
-
-      <!-- Foreground emerald coastal hills -->
-      <path d="M74 278 L134 222 L186 250 L236 206 L306 266 L382 234 L382 292 L74 292 Z" fill="url(#midMountain)"/>
-      <!-- Sunlit mountain face highlights -->
-      <path d="M134 222 L154 270 L74 278 Z" fill="url(#nearSlope)" opacity="0.58"/>
-      <path d="M236 206 L264 268 L186 250 Z" fill="url(#nearSlope)" opacity="0.48"/>
-
-      <!-- Turquoise ocean cove -->
-      <rect x="82" y="270" width="292" height="96" fill="url(#oceanGrad)"/>
-      <!-- Sun reflection shimmer on ocean -->
-      <g fill="#fef3c7" opacity="0.58">
-        <rect x="136" y="282" width="44" height="4" rx="2"/>
-        <rect x="128" y="293" width="58" height="4" rx="2" opacity="0.78"/>
-        <rect x="142" y="305" width="34" height="3.5" rx="1.75" opacity="0.58"/>
-        <rect x="148" y="316" width="22" height="3" rx="1.5" opacity="0.42"/>
-      </g>
-
-      <!-- Sweeping golden shoreline & crisp ocean foam -->
-      <path d="M82 334 Q186 314 286 342 T382 332 L382 368 L82 368 Z" fill="url(#beachSand)" opacity="0.92"/>
-      <path d="M82 332 Q186 310 286 339 T382 328" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" opacity="0.92"/>
-      <path d="M98 322 Q190 303 284 329 T374 319" fill="none" stroke="#e0f2fe" stroke-width="2.5" stroke-linecap="round" opacity="0.62"/>
+      <!-- Subtle glass horizon line -->
+      <rect x="108" y="294" width="234" height="28" fill="#082f49" opacity="0.45"/>
+      <line x1="126" y1="298" x2="224" y2="298" stroke="#bae6fd" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
     </g>
 
-    <!-- Subtle inner border on photo viewport -->
-    <rect x="82" y="84" width="292" height="278" rx="10" fill="none" stroke="#0f172a" stroke-opacity="0.14" stroke-width="2"/>
+    <!-- Minimalist bottom caption bar hint on the white Polaroid chin -->
+    <rect x="120" y="346" width="84" height="10" rx="5" fill="#94a3b8" opacity="0.45"/>
+    <rect x="120" y="362" width="52" height="7" rx="3.5" fill="#cbd5e1" opacity="0.7"/>
   </g>
 
-  <!-- Iconic macOS Preview Magnifying Glass Loupe -->
-  <g filter="url(#loupeShadow)">
-    <!-- Handle (45 deg bottom-right from lens center 304,296) -->
-    <g transform="translate(304, 296) rotate(-45)">
-      <!-- Metallic collar / ferrule -->
-      <rect x="-15" y="100" width="30" height="26" rx="4" fill="url(#ferruleGrad)" stroke="#475569" stroke-width="1.5"/>
-      <line x1="-14" y1="109" x2="14" y2="109" stroke="#64748b" stroke-width="1.5" opacity="0.7"/>
-      <!-- Anodized graphite tapered handle (sized cleanly inside 512x512 with shadow room) -->
-      <path d="M-19 124 L19 124 L23 210 C23 224 12 232 0 232 C-12 232 -23 224 -23 210 Z" fill="url(#handleGrad)" stroke="#0f172a" stroke-width="2"/>
-      <!-- Sleek specular highlight down the handle -->
-      <rect x="-10" y="134" width="6" height="80" rx="3" fill="#94a3b8" opacity="0.48"/>
-      <!-- Silver accent ring near collar -->
-      <rect x="-19" y="124" width="38" height="6" rx="2" fill="#e2e8f0" opacity="0.88"/>
+  <!-- Modern Sleek Magnifying Glass Loupe -->
+  <g filter="url(#loupeDrop)">
+    <!-- Clean geometric pill handle (45 deg bottom-right) -->
+    <g transform="translate(310, 302) rotate(-45)">
+      <!-- Short dark bridge connector -->
+      <rect x="-12" y="84" width="24" height="20" rx="4" fill="#0f172a"/>
+      <!-- Glowing cyan-blue sleek capsule handle -->
+      <rect x="-17" y="96" width="34" height="90" rx="17" fill="url(#loupeHandle)"/>
+      <!-- Crisp top-left highlight edge on handle -->
+      <rect x="-9" y="106" width="6" height="68" rx="3" fill="#e0f2fe" opacity="0.58"/>
     </g>
 
-    <!-- Crystal clear glass lens interior -->
+    <!-- Frosted translucent lens -->
     <g clip-path="url(#lensClip)">
-      <!-- Glass refraction gradient -->
-      <circle cx="304" cy="296" r="93" fill="url(#glassTint)"/>
-      <!-- Glossy curved specular highlight on top-left of lens -->
-      <path d="M232 262 C246 218 298 197 350 216 C364 222 370 235 358 241 C316 226 268 240 246 275 C238 287 227 279 232 262 Z" fill="url(#glassGlare)"/>
-      <!-- Secondary bottom-right caustic glint -->
-      <path d="M338 368 C358 360 374 342 380 322" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.50"/>
+      <circle cx="310" cy="302" r="76" fill="url(#lensGlass)"/>
+      <!-- Clean geometric diagonal glass sheen -->
+      <path d="M248 272 C262 234 306 218 348 234 C358 238 360 250 350 254 C316 242 278 254 260 284 C253 294 244 286 248 272 Z" fill="url(#lensSheen)"/>
     </g>
 
-    <!-- Brushed chrome metallic bezel ring -->
-    <circle cx="304" cy="296" r="103" fill="none" stroke="url(#bezelOuter)" stroke-width="22"/>
-    <!-- Crisp outer metallic rim -->
-    <circle cx="304" cy="296" r="114" fill="none" stroke="url(#bezelRimStroke)" stroke-width="2.5"/>
-    <!-- Inner beveled ring -->
-    <circle cx="304" cy="296" r="92" fill="none" stroke="url(#bezelInner)" stroke-width="3"/>
+    <!-- Subtle contrast outer ring so loupe pops crisply against white photo edge -->
+    <circle cx="310" cy="302" r="90" fill="none" stroke="#0b0d14" stroke-opacity="0.55" stroke-width="4"/>
+    <!-- Bold luminous modern bezel ring -->
+    <circle cx="310" cy="302" r="82" fill="none" stroke="url(#loupeRing)" stroke-width="16"/>
   </g>
 </svg>
