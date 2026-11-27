@@ -349,11 +349,11 @@ bool exportPdf(const QString &outputPath,
     // Write beside the target and rename atomically so an interrupted export
     // never leaves a half-written PDF behind.
     const QString tempPath = parentDir.filePath(
-        "." + targetInfo.fileName() + ".peek-" + QUuid::createUuid().toString(QUuid::Id128) + ".tmp");
+        "." + targetInfo.fileName() + ".omarchy-preview-" + QUuid::createUuid().toString(QUuid::Id128) + ".tmp");
 
     {
         QPdfWriter writer(tempPath);
-        writer.setCreator("Peek");
+        writer.setCreator("Omarchy Preview");
         writer.setTitle(targetInfo.completeBaseName());
         writer.setResolution(300);
 
@@ -434,13 +434,19 @@ void PrintPreviewItem::setController(QObject *obj) {
 
     m_backend = b;
     if (m_backend) {
-        connect(m_backend, &Backend::imageChanged, this, [this] { update(); });
-        connect(m_backend, &Backend::printSettingsChanged, this, [this] { update(); });
-        connect(m_backend, &Backend::selectionChanged, this, [this] { update(); });
-        connect(m_backend, &Backend::filesChanged, this, [this] { update(); });
+        auto refreshIfVisible = [this] {
+            if (isVisible())
+                update();
+        };
+        connect(m_backend, &Backend::imageChanged, this, refreshIfVisible);
+        connect(m_backend, &Backend::printSettingsChanged, this, refreshIfVisible);
+        connect(m_backend, &Backend::selectionChanged, this, refreshIfVisible);
+        connect(m_backend, &Backend::filesChanged, this, refreshIfVisible);
+        connect(this, &QQuickItem::visibleChanged, this, refreshIfVisible);
     }
     emit controllerChanged();
-    update();
+    if (isVisible())
+        update();
 }
 
 void PrintPreviewItem::paint(QPainter *painter) {

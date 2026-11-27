@@ -1,23 +1,26 @@
 ---
-name: peek
+name: omarchy-preview
 description: >
   Preview images and PDFs, organize/merge PDF pages, crop/resize/color-adjust/convert
-  formats, export print-ready PDFs, and print via CUPS using the peek desktop app
+  formats, export print-ready PDFs, and print via CUPS using the omarchy-preview desktop app
   and headless CLI.
 ---
 
-# Peek
+# Omarchy Preview
 
-`peek` is an Omarchy image & PDF viewer, quick editor, and print utility with headless CLI support.
+`omarchy-preview` is an Omarchy image & PDF viewer, quick editor, and print utility with headless CLI support.
 
 ## Commands
 
-- `peek [open] <file ...>` — Open image(s) or PDF document(s) in the desktop viewer.
-- `peek printers --json` — List configured CUPS printers and the default destination.
-- `peek presets --json` — List built-in and saved print presets.
-- `peek inspect <file> [--json]` — Show image dimensions, 300 DPI print size, and EXIF metadata, or PDF page count, physical page size, and document info.
-- `peek export <file ...> -o <out> [options] --json` — Export edited image (PNG/JPEG/WebP/TIFF/BMP) or merge/slice/export print-ready 300 DPI PDF.
-- `peek print <file ...> [--printer <name>] [--preset <name>] [--copies <n>] [options] --json` — Render and send image(s) or PDF pages directly to CUPS.
+- `omarchy-preview [open] <file ...>` — Open image(s) or PDF document(s) in the desktop viewer.
+- `omarchy-preview printers --json` — List configured CUPS printers and the default destination.
+- `omarchy-preview presets --json` — List built-in and saved print presets.
+- `omarchy-preview inspect <file> [--json]` — Show image dimensions, 300 DPI print size, and EXIF metadata, or PDF page count, physical page size, outline count, and document info.
+- `omarchy-preview search <pdf> <query> [--case-sensitive] [--pages <range>] --json` — Search text across PDF pages and return normalized bounding boxes per match.
+- `omarchy-preview text <pdf> [--pages <range>] --json` — Extract UTF-8 text from all or selected PDF pages.
+- `omarchy-preview outline <pdf> --json` — List the PDF document outline / table of contents with nesting depths and 1-based page numbers.
+- `omarchy-preview export <file ...> -o <out> [options] --json` — Export edited image (PNG/JPEG/WebP/TIFF/BMP) or merge/slice/export print-ready 300 DPI PDF.
+- `omarchy-preview print <file ...> [--printer <name>] [--preset <name>] [--copies <n>] [options] --json` — Render and send image(s) or PDF pages directly to CUPS.
 
 ## Edit & export options
 

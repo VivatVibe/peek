@@ -9,8 +9,12 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImageReader>
+#include <QMetaObject>
+#include <QMutexLocker>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QThread>
 #include <QUuid>
 #include <QVariantMap>
 #include <algorithm>
@@ -211,6 +215,7 @@ Backend::Backend(FilePicker *filePicker,
 }
 
 Backend::~Backend() {
+    cancelActiveSearch();
     auto stopProc = [](QProcess &proc) {
         if (proc.state() != QProcess::NotRunning) {
             proc.kill();
@@ -233,6 +238,10 @@ QString Backend::filePath() const {
 QString Backend::fileName() const {
     const QString path = filePath();
     return path.isEmpty() ? QString() : QFileInfo(path).fileName();
+}
+
+bool Backend::currentPageIsPdf() const {
+    return m_currentIndex >= 0 && m_currentIndex < m_entries.size() && m_entries.at(m_currentIndex).isPdfPage;
 }
 
 bool Backend::hasDocumentChanges() const {
@@ -306,14 +315,23 @@ void Backend::setPrintSelectionOnly(bool enabled) {
 }
 
 QImage Backend::thumbnailForIndex(int index) const {
-    if (index < 0 || index >= m_entries.size())
-        return {};
-    if (index == m_currentIndex && !m_displayImage.isNull())
-        return m_displayImage.scaled(220, 220, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    if (m_thumbCache.contains(index))
-        return m_thumbCache.value(index);
+    PageEntry entry;
+    QImage currentScaled;
+    {
+        QMutexLocker lock(&m_thumbMutex);
+        if (index < 0 || index >= m_entries.size())
+            return {};
+        if (index == m_currentIndex && !m_displayImage.isNull())
+            currentScaled = m_displayImage;
+        else if (m_thumbCache.contains(index))
+            return m_thumbCache.value(index);
+        else
+            entry = m_entries.at(index);
+    }
 
-    const PageEntry &entry = m_entries.at(index);
+    if (!currentScaled.isNull())
+        return currentScaled.scaled(220, 220, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
     QImage thumb;
     if (entry.isPdfPage) {
         thumb = PdfDocument::renderPage(entry.sourcePath, entry.sourcePageIndex, 36.0);
@@ -342,7 +360,13 @@ QImage Backend::thumbnailForIndex(int index) const {
     }
     if (!thumb.isNull() && (thumb.width() > 220 || thumb.height() > 220))
         thumb = thumb.scaled(220, 220, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    m_thumbCache.insert(index, thumb);
+
+    {
+        QMutexLocker lock(&m_thumbMutex);
+        if (m_thumbCache.size() >= 160)
+            m_thumbCache.clear();
+        m_thumbCache.insert(index, thumb);
+    }
     return thumb;
 }
 
@@ -481,11 +505,83 @@ QVector<QVector<QImage>> Backend::buildPrintPages(bool highRes) const {
 }
 
 QVector<QImage> Backend::previewPageImages() const {
-    const QVector<QVector<QImage>> pages = buildPrintPages(false);
-    if (pages.isEmpty())
+    if (!hasImage())
         return {};
-    const int idx = std::clamp(m_previewPageIndex, 0, static_cast<int>(pages.size()) - 1);
-    return pages.at(idx);
+
+    const int n = PrintRenderer::normalizePerPage(m_printSettings.perPage);
+    // Only render the 1..perPage entries visible on the active preview sheet
+    // instead of rasterizing the entire document.
+    if (m_pageRangeMode != "current" && m_entries.size() > 1) {
+        const QVector<int> indices = activeBatchIndices();
+        if (!indices.isEmpty()) {
+            const int totalPages = (static_cast<int>(indices.size()) + n - 1) / n;
+            const int pageIdx = std::clamp(m_previewPageIndex, 0, std::max(0, totalPages - 1));
+            const int start = pageIdx * n;
+            const int end = std::min(start + n, static_cast<int>(indices.size()));
+            QVector<QImage> slotImages;
+            slotImages.reserve(end - start);
+            for (int i = start; i < end; ++i) {
+                const QImage rendered = renderEntryForPrint(indices.at(i), false);
+                if (!rendered.isNull())
+                    slotImages.append(rendered);
+            }
+            if (!slotImages.isEmpty())
+                return slotImages;
+        }
+    }
+
+    const QImage single = renderEntryForPrint(m_currentIndex, false);
+    if (single.isNull())
+        return {};
+    return QVector<QImage>(n, single);
+}
+
+QSize Backend::previewReferenceSize() const {
+    if (!hasImage())
+        return {};
+
+    int refIdx = m_currentIndex;
+    if (m_pageRangeMode != "current" && m_entries.size() > 1) {
+        const QVector<int> indices = activeBatchIndices();
+        if (!indices.isEmpty()) {
+            const int n = PrintRenderer::normalizePerPage(m_printSettings.perPage);
+            const int totalPages = (static_cast<int>(indices.size()) + n - 1) / n;
+            const int pageIdx = std::clamp(m_previewPageIndex, 0, std::max(0, totalPages - 1));
+            const int start = pageIdx * n;
+            if (start >= 0 && start < indices.size())
+                refIdx = indices.at(start);
+        }
+    }
+
+    if (refIdx < 0 || refIdx >= m_entries.size())
+        return m_displayImage.size();
+    if (refIdx == m_currentIndex) {
+        if (m_printSelectionOnly && hasSelection()) {
+            const QRect crop = selectionPixelRect().intersected(m_displayImage.rect());
+            if (crop.isValid() && crop.width() >= 2 && crop.height() >= 2)
+                return crop.size();
+        }
+        return m_displayImage.size();
+    }
+
+    const PageEntry &entry = m_entries.at(refIdx);
+    QSize sz;
+    if (entry.isPdfPage) {
+        const QSizeF mm = PdfDocument::pageSizeMm(entry.sourcePath, entry.sourcePageIndex);
+        if (mm.isValid() && !mm.isEmpty())
+            sz = QSize(std::max(1, static_cast<int>(std::round(mm.width() * 10.0))),
+                       std::max(1, static_cast<int>(std::round(mm.height() * 10.0))));
+    } else {
+        QImageReader reader(entry.sourcePath);
+        reader.setAutoTransform(true);
+        sz = reader.size();
+    }
+    if (!sz.isValid() || sz.isEmpty())
+        return m_displayImage.size();
+    const int rot = ((entry.edit.rotation % 360) + 360) % 360;
+    if (rot == 90 || rot == 270)
+        sz.transpose();
+    return sz;
 }
 
 void Backend::setPrinter(const QString &name) {
@@ -715,21 +811,15 @@ int Backend::previewPageCount() const {
 }
 
 bool Backend::effectiveLandscape() const {
-    const QVector<QImage> slotImages = previewPageImages();
-    const QSize refSize = slotImages.isEmpty() ? m_displayImage.size() : slotImages.first().size();
-    return PrintRenderer::resolveLandscape(m_printSettings, refSize);
+    return PrintRenderer::resolveLandscape(m_printSettings, previewReferenceSize());
 }
 
 double Backend::paperWidthMm() const {
-    const QVector<QImage> slotImages = previewPageImages();
-    const QSize refSize = slotImages.isEmpty() ? m_displayImage.size() : slotImages.first().size();
-    return PrintRenderer::effectivePageSizeMm(m_printSettings, refSize).width();
+    return PrintRenderer::effectivePageSizeMm(m_printSettings, previewReferenceSize()).width();
 }
 
 double Backend::paperHeightMm() const {
-    const QVector<QImage> slotImages = previewPageImages();
-    const QSize refSize = slotImages.isEmpty() ? m_displayImage.size() : slotImages.first().size();
-    return PrintRenderer::effectivePageSizeMm(m_printSettings, refSize).height();
+    return PrintRenderer::effectivePageSizeMm(m_printSettings, previewReferenceSize()).height();
 }
 
 bool Backend::isSupportedImageFile(const QString &path) {
@@ -830,14 +920,29 @@ bool Backend::openFiles(const QStringList &paths) {
         return false;
     }
 
-    m_entries = std::move(entries);
+    cancelActiveSearch();
+    {
+        QMutexLocker lock(&m_thumbMutex);
+        m_entries = std::move(entries);
+        m_currentIndex = -1;
+        m_thumbCache.clear();
+    }
     m_isPdfMode = pdfMode;
     m_documentDirty = false;
-    m_currentIndex = -1;
     m_selectedIndices.clear();
-    m_thumbCache.clear();
     m_batchImageCache.clear();
     m_pageRangeText.clear();
+    m_searchQuery.clear();
+    m_searchMatches.clear();
+    m_searchCurrentIndex = -1;
+    m_cachedSearchRectsEntry = -1;
+    m_cachedSearchPageMatches.clear();
+    m_pageTextWords.clear();
+    m_pageChars.clear();
+    m_textSelStart = -1;
+    m_textSelEnd = -1;
+    m_selectedText.clear();
+    m_textSelPdfRects.clear();
     if (m_isPdfMode && m_entries.size() > 1) {
         m_pageRangeMode = "all";
         m_multiMode = "selected";
@@ -845,8 +950,12 @@ bool Backend::openFiles(const QStringList &paths) {
         m_pageRangeMode = "current";
         m_multiMode = "repeat";
     }
+    rebuildOutline();
     ++m_fileListVersion;
     emit filesChanged();
+    emit searchChanged();
+    emit textSelectionChanged();
+    emit pdfTextChanged();
 
     return loadIndex(std::max(0, startIndex));
 }
@@ -942,9 +1051,6 @@ bool Backend::movePage(int fromIndex, int toIndex) {
     commitColorEdit();
     syncCurrentEntryEdits();
 
-    PageEntry moved = m_entries.takeAt(fromIndex);
-    m_entries.insert(toIndex, moved);
-
     // Remap current index and multi-selection set cleanly.
     auto remap = [fromIndex, toIndex](int idx) {
         if (idx == fromIndex)
@@ -956,7 +1062,13 @@ bool Backend::movePage(int fromIndex, int toIndex) {
         return idx;
     };
 
-    m_currentIndex = remap(m_currentIndex);
+    {
+        QMutexLocker lock(&m_thumbMutex);
+        PageEntry moved = m_entries.takeAt(fromIndex);
+        m_entries.insert(toIndex, moved);
+        m_currentIndex = remap(m_currentIndex);
+        m_thumbCache.clear();
+    }
     QSet<int> remappedSel;
     for (int idx : m_selectedIndices)
         remappedSel.insert(remap(idx));
@@ -964,7 +1076,6 @@ bool Backend::movePage(int fromIndex, int toIndex) {
 
     m_isPdfMode = true;
     m_documentDirty = true;
-    m_thumbCache.clear();
     ++m_fileListVersion;
     clampPreviewPage();
 
@@ -978,6 +1089,9 @@ bool Backend::movePage(int fromIndex, int toIndex) {
     emit filesChanged();
     emit imageChanged();
     emit printSettingsChanged();
+    emit outlineChanged();
+    if (!m_searchQuery.isEmpty())
+        runSearch(false);
     return true;
 }
 
@@ -997,7 +1111,11 @@ bool Backend::deletePage(int index) {
     syncCurrentEntryEdits();
 
     const bool deletingCurrent = (index == m_currentIndex);
-    m_entries.removeAt(index);
+    {
+        QMutexLocker lock(&m_thumbMutex);
+        m_entries.removeAt(index);
+        m_thumbCache.clear();
+    }
 
     QSet<int> remappedSel;
     for (int idx : m_selectedIndices) {
@@ -1009,17 +1127,21 @@ bool Backend::deletePage(int index) {
 
     m_isPdfMode = true;
     m_documentDirty = true;
-    m_thumbCache.clear();
     ++m_fileListVersion;
 
     if (deletingCurrent) {
         const int nextIndex = std::clamp(index, 0, static_cast<int>(m_entries.size()) - 1);
-        m_currentIndex = -1;
+        {
+            QMutexLocker lock(&m_thumbMutex);
+            m_currentIndex = -1;
+        }
         emit filesChanged();
         loadIndex(nextIndex);
     } else {
-        if (index < m_currentIndex)
+        if (index < m_currentIndex) {
+            QMutexLocker lock(&m_thumbMutex);
             --m_currentIndex;
+        }
         if (m_currentIndex >= 0 && m_currentIndex < m_entries.size()) {
             const PageEntry &cur = m_entries.at(m_currentIndex);
             m_metadata = Inspector::readMetadata(cur.sourcePath, m_displayImage,
@@ -1030,7 +1152,10 @@ bool Backend::deletePage(int index) {
         emit filesChanged();
         emit imageChanged();
         emit printSettingsChanged();
+        emit outlineChanged();
     }
+    if (!m_searchQuery.isEmpty())
+        runSearch(false);
     setStatus(tr("Removed page (original file unchanged)"));
     return true;
 }
@@ -1050,6 +1175,7 @@ bool Backend::appendFiles(const QStringList &paths) {
     syncCurrentEntryEdits();
 
     int added = 0;
+    QVector<PageEntry> newEntries;
     for (const QString &raw : paths) {
         const QFileInfo fi(raw);
         if (!fi.exists() || !fi.isFile())
@@ -1063,11 +1189,11 @@ bool Backend::appendFiles(const QStringList &paths) {
                 continue;
             }
             for (int p = 0; p < pages; ++p) {
-                m_entries.append({true, abs, p, EditState{}, false});
+                newEntries.append({true, abs, p, EditState{}, false});
                 ++added;
             }
         } else if (isSupportedImageFile(abs)) {
-            m_entries.append({false, abs, 0, EditState{}, false});
+            newEntries.append({false, abs, 0, EditState{}, false});
             ++added;
         }
     }
@@ -1078,16 +1204,24 @@ bool Backend::appendFiles(const QStringList &paths) {
         return false;
     }
 
+    {
+        QMutexLocker lock(&m_thumbMutex);
+        for (auto &e : newEntries)
+            m_entries.append(std::move(e));
+        m_thumbCache.clear();
+    }
     m_isPdfMode = true;
     m_documentDirty = true;
     m_pageRangeMode = "all";
     m_multiMode = "selected";
-    m_thumbCache.clear();
+    rebuildOutline();
     ++m_fileListVersion;
     clampPreviewPage();
     emit filesChanged();
     emit imageChanged();
     emit printSettingsChanged();
+    if (!m_searchQuery.isEmpty())
+        runSearch(false);
     setStatus(tr("Added %n pages", "", added));
     return true;
 }
@@ -1119,6 +1253,7 @@ void Backend::setSelectionRect(double x, double y, double w, double h) {
         return;
     }
 
+    clearTextSelection();
     m_selectionNorm = norm;
     m_printSelectionOnly = true;
     emit selectionChanged();
@@ -1158,6 +1293,10 @@ void Backend::cropToSelection() {
 void Backend::copyToClipboard() {
     if (!hasImage())
         return;
+    if (hasTextSelection()) {
+        copySelectedText();
+        return;
+    }
     QClipboard *clip = QGuiApplication::clipboard();
     if (!clip) {
         setError(tr("Clipboard is unavailable."));
@@ -1175,6 +1314,336 @@ void Backend::copyToClipboard() {
 
     clip->setImage(m_displayImage);
     setStatus(tr("Copied image to clipboard"));
+}
+
+void Backend::setSearchCaseSensitive(bool enabled) {
+    if (enabled == m_searchCaseSensitive)
+        return;
+    m_searchCaseSensitive = enabled;
+    if (!m_searchQuery.isEmpty())
+        runSearch(true);
+    else
+        emit searchChanged();
+}
+
+void Backend::setSearchQuery(const QString &query) {
+    if (query == m_searchQuery)
+        return;
+    m_searchQuery = query;
+    if (m_searchQuery.isEmpty()) {
+        cancelActiveSearch();
+        m_searchMatches.clear();
+        m_searchCurrentIndex = -1;
+        emit searchChanged();
+        return;
+    }
+    runSearch(true);
+}
+
+void Backend::nextSearchMatch() {
+    if (m_searchMatches.isEmpty())
+        return;
+    m_searchCurrentIndex = (m_searchCurrentIndex + 1) % m_searchMatches.size();
+    const int targetEntry = m_searchMatches.at(m_searchCurrentIndex).entryIndex;
+    if (targetEntry != m_currentIndex)
+        loadIndex(targetEntry);
+    emit searchChanged();
+}
+
+void Backend::previousSearchMatch() {
+    if (m_searchMatches.isEmpty())
+        return;
+    const int count = static_cast<int>(m_searchMatches.size());
+    m_searchCurrentIndex = (m_searchCurrentIndex - 1 + count) % count;
+    const int targetEntry = m_searchMatches.at(m_searchCurrentIndex).entryIndex;
+    if (targetEntry != m_currentIndex)
+        loadIndex(targetEntry);
+    emit searchChanged();
+}
+
+void Backend::clearSearch() {
+    cancelActiveSearch();
+    if (m_searchQuery.isEmpty() && m_searchMatches.isEmpty() && m_searchCurrentIndex < 0 && !m_searchBusy)
+        return;
+    m_searchQuery.clear();
+    m_searchMatches.clear();
+    m_searchCurrentIndex = -1;
+    m_cachedSearchRectsEntry = -1;
+    m_cachedSearchPageMatches.clear();
+    m_searchBusy = false;
+    emit searchChanged();
+}
+
+const QVector<PdfDocument::PdfPageMatch> &Backend::ensureCurrentPageSearchMatches() const {
+    static const QVector<PdfDocument::PdfPageMatch> empty;
+    if (m_currentIndex < 0 || m_currentIndex >= m_entries.size() || m_searchQuery.isEmpty())
+        return empty;
+    const PageEntry &cur = m_entries.at(m_currentIndex);
+    if (!cur.isPdfPage)
+        return empty;
+    if (m_cachedSearchRectsEntry == m_currentIndex &&
+        m_cachedSearchRectsQuery == m_searchQuery &&
+        m_cachedSearchRectsCase == m_searchCaseSensitive) {
+        return m_cachedSearchPageMatches;
+    }
+    m_cachedSearchPageMatches = PdfDocument::searchPageMatches(
+        cur.sourcePath, cur.sourcePageIndex, m_searchQuery, m_searchCaseSensitive);
+    m_cachedSearchRectsEntry = m_currentIndex;
+    m_cachedSearchRectsQuery = m_searchQuery;
+    m_cachedSearchRectsCase = m_searchCaseSensitive;
+    return m_cachedSearchPageMatches;
+}
+
+QVariantList Backend::currentPageSearchRects() const {
+    QVariantList out;
+    if (m_currentIndex < 0 || m_searchMatches.isEmpty())
+        return out;
+    const auto &pageMatches = ensureCurrentPageSearchMatches();
+    if (pageMatches.isEmpty())
+        return out;
+
+    int activeOrdinal = -1;
+    if (m_searchCurrentIndex >= 0 && m_searchCurrentIndex < m_searchMatches.size()) {
+        const auto &cur = m_searchMatches.at(m_searchCurrentIndex);
+        if (cur.entryIndex == m_currentIndex)
+            activeOrdinal = std::clamp(cur.matchIndexOnPage, 0, static_cast<int>(pageMatches.size()) - 1);
+    }
+
+    for (int i = 0; i < pageMatches.size(); ++i) {
+        const bool isActive = (i == activeOrdinal);
+        for (const QRectF &pdfRect : pageMatches.at(i).rects) {
+            const QRectF mapped = PdfDocument::mapPdfNormToDisplay(
+                pdfRect, m_edit.rotation, m_edit.flipH, m_edit.flipV, m_edit.cropRect, m_sourceImage.size());
+            if (mapped.isEmpty())
+                continue;
+            QVariantMap row;
+            row.insert("x", mapped.x());
+            row.insert("y", mapped.y());
+            row.insert("width", mapped.width());
+            row.insert("height", mapped.height());
+            row.insert("active", isActive);
+            out.append(row);
+        }
+    }
+    return out;
+}
+
+QVariantMap Backend::activeSearchRect() const {
+    if (m_searchCurrentIndex < 0 || m_searchCurrentIndex >= m_searchMatches.size())
+        return {{"valid", false}};
+    const auto &cur = m_searchMatches.at(m_searchCurrentIndex);
+    if (cur.entryIndex != m_currentIndex)
+        return {{"valid", false}};
+    const auto &pageMatches = ensureCurrentPageSearchMatches();
+    if (pageMatches.isEmpty())
+        return {{"valid", false}};
+    const int idx = std::clamp(cur.matchIndexOnPage, 0, static_cast<int>(pageMatches.size()) - 1);
+    if (pageMatches.at(idx).rects.isEmpty())
+        return {{"valid", false}};
+    const QRectF mapped = PdfDocument::mapPdfNormToDisplay(
+        pageMatches.at(idx).rects.first(), m_edit.rotation, m_edit.flipH, m_edit.flipV, m_edit.cropRect, m_sourceImage.size());
+    if (mapped.isEmpty())
+        return {{"valid", false}};
+    return {
+        {"valid", true},
+        {"x", mapped.x()},
+        {"y", mapped.y()},
+        {"width", mapped.width()},
+        {"height", mapped.height()}
+    };
+}
+
+int Backend::selectedTextWordCount() const {
+    if (m_selectedText.trimmed().isEmpty())
+        return 0;
+    return static_cast<int>(m_selectedText.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts).size());
+}
+
+QVariantList Backend::textSelectionRects() const {
+    QVariantList out;
+    if (m_textSelPdfRects.isEmpty())
+        return out;
+    out.reserve(m_textSelPdfRects.size());
+    for (const QRectF &pdfRect : m_textSelPdfRects) {
+        const QRectF mapped = PdfDocument::mapPdfNormToDisplay(
+            pdfRect, m_edit.rotation, m_edit.flipH, m_edit.flipV, m_edit.cropRect, m_sourceImage.size());
+        if (mapped.isEmpty())
+            continue;
+        QVariantMap row;
+        row.insert("x", mapped.x());
+        row.insert("y", mapped.y());
+        row.insert("width", mapped.width());
+        row.insert("height", mapped.height());
+        out.append(row);
+    }
+    return out;
+}
+
+bool Backend::isPointOverText(double normX, double normY) const {
+    if (m_pageTextWords.isEmpty() || !currentPageIsPdf())
+        return false;
+    const QPointF pt = PdfDocument::mapDisplayNormToPdf(
+        QPointF(normX, normY), m_edit.rotation, m_edit.flipH, m_edit.flipV, m_edit.cropRect, m_sourceImage.size());
+    constexpr double pad = 0.005;
+    for (const PdfTextWord &w : m_pageTextWords) {
+        if (w.normRect.adjusted(-pad, -pad, pad, pad).contains(pt))
+            return true;
+    }
+    return false;
+}
+
+void Backend::selectTextRange(double startNormX, double startNormY, double endNormX, double endNormY) {
+    if (m_pageChars.isEmpty() || !currentPageIsPdf()) {
+        clearTextSelection();
+        return;
+    }
+    const QPointF p1 = PdfDocument::mapDisplayNormToPdf(
+        QPointF(startNormX, startNormY), m_edit.rotation, m_edit.flipH, m_edit.flipV, m_edit.cropRect, m_sourceImage.size());
+    const QPointF p2 = PdfDocument::mapDisplayNormToPdf(
+        QPointF(endNormX, endNormY), m_edit.rotation, m_edit.flipH, m_edit.flipV, m_edit.cropRect, m_sourceImage.size());
+
+    const int idx1 = findNearestCharIndex(p1);
+    const int idx2 = findNearestCharIndex(p2);
+    if (idx1 < 0 || idx2 < 0) {
+        clearTextSelection();
+        return;
+    }
+    applyCharSelectionRange(idx1, idx2);
+}
+
+void Backend::selectWordAt(double normX, double normY) {
+    if (m_pageChars.isEmpty() || !currentPageIsPdf())
+        return;
+    const QPointF pt = PdfDocument::mapDisplayNormToPdf(
+        QPointF(normX, normY), m_edit.rotation, m_edit.flipH, m_edit.flipV, m_edit.cropRect, m_sourceImage.size());
+
+    int targetWord = -1;
+    constexpr double pad = 0.008;
+    for (int i = 0; i < m_pageTextWords.size(); ++i) {
+        if (m_pageTextWords.at(i).normRect.adjusted(-pad, -pad, pad, pad).contains(pt)) {
+            targetWord = i;
+            break;
+        }
+    }
+    if (targetWord < 0)
+        return;
+
+    int first = -1, last = -1;
+    for (int i = 0; i < m_pageChars.size(); ++i) {
+        if (m_pageChars.at(i).wordIndex == targetWord) {
+            if (first < 0)
+                first = i;
+            last = i;
+        }
+    }
+    if (first >= 0)
+        applyCharSelectionRange(first, last);
+}
+
+void Backend::selectLineAt(double normX, double normY) {
+    if (m_pageChars.isEmpty() || !currentPageIsPdf())
+        return;
+    const QPointF pt = PdfDocument::mapDisplayNormToPdf(
+        QPointF(normX, normY), m_edit.rotation, m_edit.flipH, m_edit.flipV, m_edit.cropRect, m_sourceImage.size());
+    const int idx = findNearestCharIndex(pt);
+    if (idx < 0)
+        return;
+    const int line = m_pageChars.at(idx).lineIndex;
+    int first = idx;
+    int last = idx;
+    while (first > 0 && m_pageChars.at(first - 1).lineIndex == line)
+        --first;
+    while (last + 1 < m_pageChars.size() && m_pageChars.at(last + 1).lineIndex == line)
+        ++last;
+    applyCharSelectionRange(first, last);
+}
+
+void Backend::selectAllPageText() {
+    if (m_pageChars.isEmpty() || !currentPageIsPdf())
+        return;
+    applyCharSelectionRange(0, static_cast<int>(m_pageChars.size()) - 1);
+}
+
+void Backend::clearTextSelection() {
+    if (m_textSelStart < 0 && m_selectedText.isEmpty() && m_textSelPdfRects.isEmpty())
+        return;
+    m_textSelStart = -1;
+    m_textSelEnd = -1;
+    m_selectedText.clear();
+    m_textSelPdfRects.clear();
+    emit textSelectionChanged();
+}
+
+void Backend::copySelectedText() {
+    if (m_selectedText.isEmpty())
+        return;
+    QClipboard *clip = QGuiApplication::clipboard();
+    if (!clip) {
+        setError(tr("Clipboard is unavailable."));
+        return;
+    }
+    clip->setText(m_selectedText);
+    setStatus(tr("Copied text to clipboard"));
+}
+
+QVariantList Backend::outlineItems() const {
+    QVariantList out;
+    if (m_outlineNodes.isEmpty())
+        return out;
+
+    // Resolve each node's current entry index in m_entries and find the active section.
+    QVector<int> resolvedEntries;
+    resolvedEntries.reserve(m_outlineNodes.size());
+    int activeNodeId = -1;
+    for (int i = 0; i < m_outlineNodes.size(); ++i) {
+        const OutlineNode &n = m_outlineNodes.at(i);
+        const int entryIdx = findEntryIndexForOutline(n.sourcePath, n.sourcePageIndex);
+        resolvedEntries.append(entryIdx);
+        if (entryIdx >= 0 && entryIdx <= m_currentIndex)
+            activeNodeId = i;
+    }
+
+    int hiddenAboveDepth = -1;
+    for (int i = 0; i < m_outlineNodes.size(); ++i) {
+        const OutlineNode &n = m_outlineNodes.at(i);
+        if (hiddenAboveDepth >= 0) {
+            if (n.depth > hiddenAboveDepth)
+                continue;
+            hiddenAboveDepth = -1;
+        }
+
+        const int entryIdx = resolvedEntries.at(i);
+        QVariantMap row;
+        row.insert("id", i);
+        row.insert("title", n.title);
+        row.insert("depth", n.depth);
+        row.insert("entryIndex", entryIdx);
+        row.insert("pageNumber", entryIdx >= 0 ? (entryIdx + 1) : 0);
+        row.insert("hasChildren", n.hasChildren);
+        row.insert("expanded", n.expanded);
+        row.insert("active", i == activeNodeId);
+        out.append(row);
+
+        if (n.hasChildren && !n.expanded)
+            hiddenAboveDepth = n.depth;
+    }
+    return out;
+}
+
+void Backend::toggleOutlineItem(int id) {
+    if (id < 0 || id >= m_outlineNodes.size() || !m_outlineNodes.at(id).hasChildren)
+        return;
+    m_outlineNodes[id].expanded = !m_outlineNodes[id].expanded;
+    emit outlineChanged();
+}
+
+void Backend::jumpToOutlineItem(int id) {
+    if (id < 0 || id >= m_outlineNodes.size())
+        return;
+    const OutlineNode &node = m_outlineNodes.at(id);
+    const int entryIdx = findEntryIndexForOutline(node.sourcePath, node.sourcePageIndex);
+    if (entryIdx >= 0)
+        selectIndex(entryIdx);
 }
 
 void Backend::applyResize(int width, int height) {
@@ -1524,7 +1993,7 @@ void Backend::printCurrent() {
         return;
     }
     if (m_lpPath.isEmpty()) {
-        setError(tr("CUPS (lp) is not installed, so Peek cannot send jobs to a printer."));
+        setError(tr("CUPS (lp) is not installed, so Omarchy Preview cannot send jobs to a printer."));
         return;
     }
     if (m_selectedPrinter.isEmpty()) {
@@ -1541,7 +2010,7 @@ void Backend::printCurrent() {
     const QVector<QVector<QImage>> pages = buildPrintPages(true);
     const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     const QString tempPdf = QDir(tempDir).filePath(
-        "peek-print-" + QUuid::createUuid().toString(QUuid::Id128) + ".pdf");
+        "omarchy-preview-print-" + QUuid::createUuid().toString(QUuid::Id128) + ".pdf");
 
     QString exportError;
     if (!PrintRenderer::exportPdf(tempPdf, pages, m_printSettings, &exportError)) {
@@ -1964,6 +2433,7 @@ QString Backend::friendlyCupsValue(const QString &value) {
 }
 
 void Backend::syncCurrentEntryEdits() {
+    QMutexLocker lock(&m_thumbMutex);
     if (m_currentIndex < 0 || m_currentIndex >= m_entries.size())
         return;
     m_entries[m_currentIndex].edit = m_edit;
@@ -2001,7 +2471,10 @@ bool Backend::loadIndex(int index) {
         }
     }
 
-    m_currentIndex = index;
+    {
+        QMutexLocker lock(&m_thumbMutex);
+        m_currentIndex = index;
+    }
     m_sourceImage = loaded;
     m_edit = entry.edit;
     m_colorEditing = false;
@@ -2012,12 +2485,17 @@ bool Backend::loadIndex(int index) {
     if (!m_hasSavedExportFormat)
         m_exportFormat = entry.isPdfPage ? "pdf" : (loaded.hasAlphaChannel() ? "png" : "jpeg");
     clearSelection();
+    clearTextSelection();
+    reloadCurrentPageText();
     rebuildPreColorImage();
     rebuildDisplayImageFromPreColor();
     clampPreviewPage();
     emit colorChanged();
     emit exportSettingsChanged();
     emit printSettingsChanged();
+    emit outlineChanged();
+    if (!m_searchMatches.isEmpty())
+        emit searchChanged();
     return true;
 }
 
@@ -2036,6 +2514,7 @@ void Backend::applyEditState(const EditState &next, bool recordUndo) {
     m_edit = next;
     ++m_editVersion;
     if (m_currentIndex >= 0 && m_currentIndex < m_entries.size()) {
+        QMutexLocker lock(&m_thumbMutex);
         m_entries[m_currentIndex].edit = m_edit;
         m_entries[m_currentIndex].dirty = !m_edit.isIdentity();
         m_thumbCache.remove(m_currentIndex);
@@ -2071,7 +2550,10 @@ void Backend::rebuildDisplayImageFromPreColor() {
                      : ImageOps::applyColorAdjustments(m_preColorImage, m_edit.color);
     if (!m_edit.annotations.isEmpty())
         img = Markup::compositeAnnotations(img, m_edit.annotations);
-    m_displayImage = img;
+    {
+        QMutexLocker lock(&m_thumbMutex);
+        m_displayImage = img;
+    }
     if (m_currentIndex >= 0 && m_currentIndex < m_entries.size()) {
         const PageEntry &cur = m_entries.at(m_currentIndex);
         m_metadata = Inspector::readMetadata(cur.sourcePath, m_displayImage,
@@ -2082,6 +2564,249 @@ void Backend::rebuildDisplayImageFromPreColor() {
     }
     ++m_imageVersion;
     emit imageChanged();
+    if (!m_searchMatches.isEmpty())
+        emit searchChanged();
+    if (!m_textSelPdfRects.isEmpty())
+        emit textSelectionChanged();
+}
+
+void Backend::reloadCurrentPageText() {
+    m_pageTextWords.clear();
+    m_pageChars.clear();
+    if (m_currentIndex >= 0 && m_currentIndex < m_entries.size()) {
+        const PageEntry &cur = m_entries.at(m_currentIndex);
+        if (cur.isPdfPage) {
+            m_pageTextWords = PdfDocument::extractTextWords(cur.sourcePath, cur.sourcePageIndex);
+            int lineIdx = 0;
+            QRectF prevWordRect;
+            for (int wIdx = 0; wIdx < m_pageTextWords.size(); ++wIdx) {
+                const PdfTextWord &w = m_pageTextWords.at(wIdx);
+                bool newLine = false;
+                if (wIdx > 0) {
+                    const double lineTol = std::max(w.normRect.height(), prevWordRect.height()) * 0.65;
+                    const bool sameY = std::abs(w.normRect.center().y() - prevWordRect.center().y()) <= std::max(0.004, lineTol);
+                    const bool goesBackward = w.normRect.left() + prevWordRect.height() * 0.5 < prevWordRect.left();
+                    if (!sameY || goesBackward) {
+                        ++lineIdx;
+                        newLine = true;
+                    }
+                }
+                const int len = w.text.size();
+                for (int cIdx = 0; cIdx < len; ++cIdx) {
+                    FlatTextChar fc;
+                    fc.wordIndex = wIdx;
+                    fc.lineIndex = lineIdx;
+                    fc.ch = w.text.at(cIdx);
+                    fc.pdfNormRect = (cIdx < w.charNormRects.size()) ? w.charNormRects.at(cIdx) : w.normRect;
+                    fc.spaceAfter = (cIdx == len - 1) && w.hasSpaceAfter;
+                    fc.lineBreakBefore = (cIdx == 0) && newLine;
+                    m_pageChars.append(fc);
+                }
+                prevWordRect = w.normRect;
+            }
+        }
+    }
+    emit pdfTextChanged();
+}
+
+void Backend::rebuildOutline() {
+    m_outlineNodes.clear();
+    QSet<QString> seenPaths;
+    for (const PageEntry &e : m_entries) {
+        if (!e.isPdfPage || seenPaths.contains(e.sourcePath))
+            continue;
+        seenPaths.insert(e.sourcePath);
+        const QVector<PdfOutlineEntry> docOutline = PdfDocument::readOutline(e.sourcePath);
+        for (const PdfOutlineEntry &item : docOutline) {
+            OutlineNode node;
+            node.title = item.title;
+            node.sourcePath = e.sourcePath;
+            node.sourcePageIndex = item.pageIndex;
+            node.depth = item.depth;
+            node.hasChildren = item.hasChildren;
+            node.expanded = item.initiallyOpen || item.depth == 0;
+            m_outlineNodes.append(std::move(node));
+        }
+    }
+    emit outlineChanged();
+}
+
+void Backend::cancelActiveSearch() {
+    ++m_searchGeneration;
+    if (m_searchCancel) {
+        m_searchCancel->store(true, std::memory_order_relaxed);
+        m_searchCancel.reset();
+    }
+    m_searchBusy = false;
+}
+
+void Backend::applySearchResults(QVector<PdfDocument::PdfBatchMatchRef> &&hits, bool jumpToMatch) {
+    m_searchMatches = std::move(hits);
+    m_cachedSearchRectsEntry = -1;
+    m_cachedSearchPageMatches.clear();
+
+    m_searchCurrentIndex = -1;
+    if (!m_searchMatches.isEmpty()) {
+        m_searchCurrentIndex = 0;
+        for (int i = 0; i < m_searchMatches.size(); ++i) {
+            if (m_searchMatches.at(i).entryIndex >= m_currentIndex) {
+                m_searchCurrentIndex = i;
+                break;
+            }
+        }
+        if (jumpToMatch) {
+            const int targetEntry = m_searchMatches.at(m_searchCurrentIndex).entryIndex;
+            if (targetEntry != m_currentIndex && targetEntry >= 0 && targetEntry < m_entries.size())
+                loadIndex(targetEntry);
+        }
+    }
+
+    emit searchChanged();
+}
+
+void Backend::runSearch(bool jumpToMatch) {
+    cancelActiveSearch();
+    m_searchMatches.clear();
+    m_searchCurrentIndex = -1;
+    m_cachedSearchRectsEntry = -1;
+    m_cachedSearchPageMatches.clear();
+
+    if (m_searchQuery.isEmpty()) {
+        emit searchChanged();
+        return;
+    }
+
+    QVector<PdfDocument::PdfBatchSearchRequest> pages;
+    pages.reserve(m_entries.size());
+    for (int i = 0; i < m_entries.size(); ++i) {
+        const PageEntry &entry = m_entries.at(i);
+        if (entry.isPdfPage)
+            pages.append({i, entry.sourcePath, entry.sourcePageIndex});
+    }
+
+    if (pages.isEmpty()) {
+        emit searchChanged();
+        return;
+    }
+
+    // Small documents finish in <25 ms synchronously; larger PDFs run on a
+    // cancellable background thread with a reusable cached text index.
+    if (pages.size() <= 16) {
+        auto hits = PdfDocument::searchBatchIndexed(pages, m_searchQuery, m_searchCaseSensitive, nullptr);
+        applySearchResults(std::move(hits), jumpToMatch);
+        return;
+    }
+
+    const quint64 gen = m_searchGeneration;
+    const QString query = m_searchQuery;
+    const bool caseSensitive = m_searchCaseSensitive;
+    auto cancel = std::make_shared<std::atomic<bool>>(false);
+    m_searchCancel = cancel;
+    m_searchBusy = true;
+    emit searchChanged();
+
+    QPointer<Backend> self(this);
+    QThread *worker = QThread::create([self, gen, pages, query, caseSensitive, jumpToMatch, cancel]() mutable {
+        auto hits = PdfDocument::searchBatchIndexed(pages, query, caseSensitive, cancel.get());
+        if (cancel->load(std::memory_order_relaxed))
+            return;
+        QMetaObject::invokeMethod(
+            self,
+            [self, gen, jumpToMatch, hits = std::move(hits)]() mutable {
+                if (!self || gen != self->m_searchGeneration)
+                    return;
+                self->m_searchBusy = false;
+                self->m_searchCancel.reset();
+                self->applySearchResults(std::move(hits), jumpToMatch);
+            },
+            Qt::QueuedConnection);
+    });
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+    worker->start();
+}
+
+void Backend::applyCharSelectionRange(int startIdx, int endIdx) {
+    if (m_pageChars.isEmpty())
+        return;
+    const int maxIdx = static_cast<int>(m_pageChars.size()) - 1;
+    const int lo = std::clamp(std::min(startIdx, endIdx), 0, maxIdx);
+    const int hi = std::clamp(std::max(startIdx, endIdx), 0, maxIdx);
+
+    clearSelection();
+    m_textSelStart = lo;
+    m_textSelEnd = hi;
+
+    QString text;
+    text.reserve(hi - lo + 16);
+    QVector<QRectF> lineRects;
+
+    int curLine = -1;
+    QRectF curRect;
+    for (int i = lo; i <= hi; ++i) {
+        const FlatTextChar &fc = m_pageChars.at(i);
+        if (i > lo && fc.lineBreakBefore)
+            text.append('\n');
+        text.append(fc.ch);
+        if (i < hi && fc.spaceAfter && !m_pageChars.at(i + 1).lineBreakBefore)
+            text.append(' ');
+
+        if (fc.lineIndex != curLine) {
+            if (curLine >= 0 && !curRect.isEmpty())
+                lineRects.append(curRect);
+            curLine = fc.lineIndex;
+            curRect = fc.pdfNormRect;
+        } else {
+            curRect = curRect.united(fc.pdfNormRect);
+        }
+    }
+    if (curLine >= 0 && !curRect.isEmpty())
+        lineRects.append(curRect);
+
+    m_selectedText = PdfDocument::containsThai(text)
+                         ? PdfDocument::normalizeThaiText(text, false, false)
+                         : text;
+    m_textSelPdfRects = std::move(lineRects);
+    emit textSelectionChanged();
+}
+
+int Backend::findNearestCharIndex(const QPointF &pdfPt) const {
+    if (m_pageChars.isEmpty())
+        return -1;
+
+    // First prefer an exact hit inside a character box.
+    for (int i = 0; i < m_pageChars.size(); ++i) {
+        if (m_pageChars.at(i).pdfNormRect.contains(pdfPt))
+            return i;
+    }
+
+    // Otherwise weight vertical distance more heavily than horizontal so dragging
+    // across a line stays locked to that line before jumping vertically.
+    int bestIdx = -1;
+    double bestScore = 1e18;
+    for (int i = 0; i < m_pageChars.size(); ++i) {
+        const QRectF &r = m_pageChars.at(i).pdfNormRect;
+        const double dx = pdfPt.x() < r.left() ? (r.left() - pdfPt.x())
+                        : (pdfPt.x() > r.right() ? (pdfPt.x() - r.right()) : 0.0);
+        const double dy = pdfPt.y() < r.top() ? (r.top() - pdfPt.y())
+                        : (pdfPt.y() > r.bottom() ? (pdfPt.y() - r.bottom()) : 0.0);
+        const double score = dx * dx + (dy * 5.0) * (dy * 5.0);
+        if (score < bestScore) {
+            bestScore = score;
+            bestIdx = i;
+        }
+    }
+    return bestIdx;
+}
+
+int Backend::findEntryIndexForOutline(const QString &sourcePath, int sourcePageIndex) const {
+    if (sourcePageIndex < 0)
+        return -1;
+    for (int i = 0; i < m_entries.size(); ++i) {
+        const PageEntry &e = m_entries.at(i);
+        if (e.isPdfPage && e.sourcePath == sourcePath && e.sourcePageIndex == sourcePageIndex)
+            return i;
+    }
+    return -1;
 }
 
 void Backend::refreshPrinterOptions() {

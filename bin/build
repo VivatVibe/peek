@@ -5,7 +5,7 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 mkdir -p "$ROOT/build"
 cd "$ROOT/build"
 
-qmake6 "$ROOT/peek.pro"
+qmake6 "$ROOT/omarchy-preview.pro"
 make -j"$(nproc)"
 
-echo "Built $ROOT/build/peek"
+echo "Built $ROOT/build/omarchy-preview"

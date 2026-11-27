@@ -224,6 +224,7 @@ QVariantMap readMetadata(const QString &filePath,
         info.insert("pdfPageNumber", pageIdx + 1);
         info.insert("pdfPageCount", totalDocPages > 0 ? totalDocPages : pdfMeta.pageCount);
         info.insert("pdfSourcePageCount", pdfMeta.pageCount);
+        info.insert("pdfOutlineCount", pdfMeta.outlineCount);
         info.insert("printWidthMm", pageMm.isValid() && !pageMm.isEmpty() ? pageMm.width() : displayImage.width() * 25.4 / 150.0);
         info.insert("printHeightMm", pageMm.isValid() && !pageMm.isEmpty() ? pageMm.height() : displayImage.height() * 25.4 / 150.0);
         if (!pdfMeta.title.isEmpty()) info.insert("pdfTitle", pdfMeta.title);

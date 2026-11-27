@@ -31,22 +31,27 @@ void printError(const QString &message, bool json) {
         printJson({{"ok", false}, {"error", message}}, true);
     } else {
         QTextStream err(stderr);
-        err << "peek: " << message << '\n';
+        err << "omarchy-preview: " << message << '\n';
     }
 }
 
 void printUsage() {
     QTextStream out(stdout);
     out << "Usage:\n"
-        << "  peek [open] [file ...]               Open images or PDFs in the viewer\n"
-        << "  peek printers [--json]               List CUPS printers\n"
-        << "  peek presets [--json]                List print presets\n"
-        << "  peek inspect <file> [--json]         Show image/PDF dimensions, pages, and EXIF\n"
-        << "  peek export <file ...> -o <out> [options] [--json]\n"
-        << "                                       Export images/PDFs (PNG/JPG/WebP/TIFF/BMP/PDF)\n"
-        << "  peek print <file ...> [--printer NAME] [--preset NAME] [--copies N] [options] [--json]\n"
-        << "                                       Print image(s) or PDF pages via CUPS\n"
-        << "  peek skill install                   Install the Peek agent skill\n"
+        << "  omarchy-preview [open] [file ...]               Open images or PDFs in the viewer\n"
+        << "  omarchy-preview printers [--json]               List CUPS printers\n"
+        << "  omarchy-preview presets [--json]                List print presets\n"
+        << "  omarchy-preview inspect <file> [--json]         Show image/PDF dimensions, pages, and EXIF\n"
+        << "  omarchy-preview search <pdf> <query> [--case-sensitive] [--pages <range>] [--json]\n"
+        << "                                                  Search text inside a PDF document\n"
+        << "  omarchy-preview text <pdf> [--pages <range>] [--json]\n"
+        << "                                                  Extract text from PDF pages\n"
+        << "  omarchy-preview outline <pdf> [--json]          List PDF table of contents (bookmarks)\n"
+        << "  omarchy-preview export <file ...> -o <out> [options] [--json]\n"
+        << "                                                  Export images/PDFs (PNG/JPG/WebP/TIFF/BMP/PDF)\n"
+        << "  omarchy-preview print <file ...> [--printer NAME] [--preset NAME] [--copies N] [options] [--json]\n"
+        << "                                                  Print image(s) or PDF pages via CUPS\n"
+        << "  omarchy-preview skill install                   Install the Omarchy Preview agent skill\n"
         << "\n"
         << "Edit & export options:\n"
         << "  --format png|jpg|webp|tiff|bmp|pdf   Output format (defaults from -o extension)\n"
@@ -315,7 +320,7 @@ int installSkill(bool json) {
     }
     const QByteArray data = bundled.readAll();
 
-    const QString destDir = QDir::homePath() + "/.agents/skills/peek";
+    const QString destDir = QDir::homePath() + "/.agents/skills/omarchy-preview";
     if (!QDir().mkpath(destDir)) {
         printError("Could not create " + destDir, json);
         return 1;
@@ -341,7 +346,7 @@ int installSkill(bool json) {
         printJson({{"ok", true}, {"path", destPath}});
     } else {
         QTextStream stream(stdout);
-        stream << "Installed Peek skill to " << destPath << '\n';
+        stream << "Installed Omarchy Preview skill to " << destPath << '\n';
     }
     return 0;
 }
@@ -354,7 +359,8 @@ bool isHeadlessCommand(int argc, char *argv[]) {
     if (argc < 2)
         return false;
     const QString cmd = QString::fromLocal8Bit(argv[1]);
-    return cmd == "printers" || cmd == "presets" || cmd == "inspect" || cmd == "export" || cmd == "print" || cmd == "skill" ||
+    return cmd == "printers" || cmd == "presets" || cmd == "inspect" || cmd == "search" || cmd == "text" ||
+           cmd == "outline" || cmd == "export" || cmd == "print" || cmd == "skill" ||
            cmd == "--help" || cmd == "-h" || cmd == "--version" || cmd == "-v";
 }
 
@@ -372,7 +378,200 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
     }
     if (cmd == "--version" || cmd == "-v") {
         QTextStream out(stdout);
-        out << "peek 0.6.0\n";
+        out << "omarchy-preview 0.7.0\n";
+        return 0;
+    }
+    if (cmd == "search") {
+        bool json = false;
+        bool caseSensitive = false;
+        QString pageRange;
+        QStringList pos;
+        for (int i = 0; i < rest.size(); ++i) {
+            const QString &arg = rest.at(i);
+            if (arg == "--json") {
+                json = true;
+            } else if (arg == "--case-sensitive" || arg == "-s") {
+                caseSensitive = true;
+            } else if (arg == "--pages") {
+                if (i + 1 >= rest.size()) {
+                    printError("Missing value for --pages", json);
+                    return 1;
+                }
+                pageRange = rest.at(++i);
+            } else if (arg.startsWith('-')) {
+                printError("Unknown option: " + arg, json);
+                return 1;
+            } else {
+                pos.append(arg);
+            }
+        }
+        if (pos.size() < 2) {
+            printError("Usage: omarchy-preview search <pdf> <query> [--case-sensitive] [--pages <range>] [--json]", json);
+            return 1;
+        }
+        const QString absPath = QFileInfo(pos.at(0)).absoluteFilePath();
+        const QString query = pos.at(1);
+        if (!PdfDocument::isPdfFile(absPath)) {
+            printError("File is not a PDF: " + pos.at(0), json);
+            return 1;
+        }
+        QString pdfErr;
+        const int totalPages = PdfDocument::pageCount(absPath, &pdfErr);
+        if (totalPages <= 0) {
+            printError(pdfErr.isEmpty() ? ("Could not open PDF: " + pos.at(0)) : pdfErr, json);
+            return 1;
+        }
+        bool rangeOk = false;
+        const QVector<int> pageIndices = PdfDocument::parsePageRange(pageRange, totalPages, &rangeOk);
+        if (!rangeOk) {
+            printError("Invalid --pages range: " + pageRange, json);
+            return 1;
+        }
+
+        QJsonArray matches;
+        for (int p : pageIndices) {
+            const QVector<QRectF> hits = PdfDocument::searchPageNormalized(absPath, p, query, caseSensitive);
+            for (const QRectF &r : hits) {
+                matches.append(QJsonObject{
+                    {"page", p + 1},
+                    {"x", r.x()},
+                    {"y", r.y()},
+                    {"width", r.width()},
+                    {"height", r.height()}
+                });
+            }
+        }
+
+        if (json) {
+            printJson({{"ok", true},
+                       {"file", absPath},
+                       {"query", query},
+                       {"caseSensitive", caseSensitive},
+                       {"totalMatches", static_cast<int>(matches.size())},
+                       {"matches", matches}});
+        } else {
+            QTextStream out(stdout);
+            out << matches.size() << " match(es) for \"" << query << "\" in " << QFileInfo(absPath).fileName() << '\n';
+            for (const QJsonValue &v : matches) {
+                const QJsonObject o = v.toObject();
+                out << "  Page " << o.value("page").toInt() << '\n';
+            }
+        }
+        return 0;
+    }
+    if (cmd == "text") {
+        bool json = false;
+        QString pageRange;
+        QString target;
+        for (int i = 0; i < rest.size(); ++i) {
+            const QString &arg = rest.at(i);
+            if (arg == "--json") {
+                json = true;
+            } else if (arg == "--pages") {
+                if (i + 1 >= rest.size()) {
+                    printError("Missing value for --pages", json);
+                    return 1;
+                }
+                pageRange = rest.at(++i);
+            } else if (arg.startsWith('-')) {
+                printError("Unknown option: " + arg, json);
+                return 1;
+            } else if (target.isEmpty()) {
+                target = arg;
+            }
+        }
+        if (target.isEmpty()) {
+            printError("Usage: omarchy-preview text <pdf> [--pages <range>] [--json]", json);
+            return 1;
+        }
+        const QString absPath = QFileInfo(target).absoluteFilePath();
+        if (!PdfDocument::isPdfFile(absPath)) {
+            printError("File is not a PDF: " + target, json);
+            return 1;
+        }
+        QString pdfErr;
+        const int totalPages = PdfDocument::pageCount(absPath, &pdfErr);
+        if (totalPages <= 0) {
+            printError(pdfErr.isEmpty() ? ("Could not open PDF: " + target) : pdfErr, json);
+            return 1;
+        }
+        bool rangeOk = false;
+        const QVector<int> pageIndices = PdfDocument::parsePageRange(pageRange, totalPages, &rangeOk);
+        if (!rangeOk) {
+            printError("Invalid --pages range: " + pageRange, json);
+            return 1;
+        }
+
+        QJsonArray pagesArr;
+        QTextStream out(stdout);
+        for (int idx = 0; idx < pageIndices.size(); ++idx) {
+            const int p = pageIndices.at(idx);
+            const QString txt = PdfDocument::extractPageText(absPath, p);
+            if (json) {
+                pagesArr.append(QJsonObject{{"page", p + 1}, {"text", txt}});
+            } else {
+                if (pageIndices.size() > 1)
+                    out << "--- Page " << (p + 1) << " ---\n";
+                out << txt << '\n';
+            }
+        }
+        if (json)
+            printJson({{"ok", true}, {"file", absPath}, {"pages", pagesArr}});
+        return 0;
+    }
+    if (cmd == "outline") {
+        bool json = false;
+        QString target;
+        for (const QString &arg : rest) {
+            if (arg == "--json")
+                json = true;
+            else if (arg.startsWith('-')) {
+                printError("Unknown option: " + arg, json);
+                return 1;
+            } else if (target.isEmpty()) {
+                target = arg;
+            }
+        }
+        if (target.isEmpty()) {
+            printError("Usage: omarchy-preview outline <pdf> [--json]", json);
+            return 1;
+        }
+        const QString absPath = QFileInfo(target).absoluteFilePath();
+        if (!PdfDocument::isPdfFile(absPath)) {
+            printError("File is not a PDF: " + target, json);
+            return 1;
+        }
+        QString pdfErr;
+        if (PdfDocument::pageCount(absPath, &pdfErr) <= 0) {
+            printError(pdfErr.isEmpty() ? ("Could not open PDF: " + target) : pdfErr, json);
+            return 1;
+        }
+
+        const QVector<PdfOutlineEntry> items = PdfDocument::readOutline(absPath);
+        if (json) {
+            QJsonArray arr;
+            for (const PdfOutlineEntry &item : items) {
+                arr.append(QJsonObject{
+                    {"title", item.title},
+                    {"depth", item.depth},
+                    {"page", item.pageIndex >= 0 ? (item.pageIndex + 1) : 0},
+                    {"hasChildren", item.hasChildren}
+                });
+            }
+            printJson({{"ok", true}, {"file", absPath}, {"count", static_cast<int>(items.size())}, {"outline", arr}});
+        } else {
+            QTextStream out(stdout);
+            if (items.isEmpty()) {
+                out << "No table of contents.\n";
+            } else {
+                for (const PdfOutlineEntry &item : items) {
+                    out << QString(item.depth * 2, ' ') << item.title;
+                    if (item.pageIndex >= 0)
+                        out << " (p. " << (item.pageIndex + 1) << ")";
+                    out << '\n';
+                }
+            }
+        }
         return 0;
     }
     if (cmd == "inspect") {
@@ -447,7 +646,7 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
         const bool json = rest.contains("--json");
         if (!rest.isEmpty() && rest.first() == "install")
             return installSkill(json);
-        printError("Usage: peek skill install", json);
+        printError("Usage: omarchy-preview skill install", json);
         return 1;
     }
     if (cmd == "presets") {
@@ -631,7 +830,7 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
         const bool repeatSingle = images.size() == 1;
         const QVector<QVector<QImage>> pages = PrintRenderer::paginateImages(images, opts.print.perPage, repeatSingle);
         const QString tempPdf = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
-                                    .filePath("peek-cli-" + QUuid::createUuid().toString(QUuid::Id128) + ".pdf");
+                                    .filePath("omarchy-preview-cli-" + QUuid::createUuid().toString(QUuid::Id128) + ".pdf");
         QString exportError;
         if (!PrintRenderer::exportPdf(tempPdf, pages, opts.print, &exportError)) {
             printError(exportError, opts.json);

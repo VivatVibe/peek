@@ -161,7 +161,7 @@ void PortalFilePicker::startRequest(const QString &method,
         return;
     }
 
-    const QString token = "peek_" + QUuid::createUuid().toString(QUuid::Id128);
+    const QString token = "omarchy_preview_" + QUuid::createUuid().toString(QUuid::Id128);
     QString senderName = bus.baseService();
     senderName.remove(0, 1); // drop leading ':'
     senderName.replace('.', '_');

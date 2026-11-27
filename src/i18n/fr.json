@@ -137,5 +137,31 @@
   "PDF page %1 is out of range.": "La page PDF %1 est hors limites.",
   "Could not load PDF page %1.": "Impossible de charger la page PDF %1.",
   "Could not render PDF page %1.": "Impossible de rendre la page PDF %1.",
-  "Could not render page %1 of %2": "Impossible de rendre la page %1 de %2"
+  "Could not render page %1 of %2": "Impossible de rendre la page %1 de %2",
+  "Find in PDF…": "Rechercher dans le PDF…",
+  "Searching…": "Recherche…",
+  "No matches": "Aucun résultat",
+  "Match Case": "Respecter la casse",
+  "Previous Match (Shift+Enter)": "Résultat précédent (Shift+Enter)",
+  "Next Match (Enter)": "Résultat suivant (Enter)",
+  "Close (Esc)": "Fermer (Esc)",
+  "Thumbnails": "Miniatures",
+  "Outline": "Sommaire",
+  "No table of contents in this PDF.": "Aucune table des matières dans ce PDF.",
+  "Toggle PDF Outline / TOC": "Afficher/masquer le sommaire PDF",
+  "Find Text in PDF": "Rechercher du texte dans le PDF",
+  "Next / Previous Match": "Résultat suivant / précédent",
+  "Toggle PDF Text Selection": "Activer/désactiver la sélection de texte PDF",
+  "Find in PDF (Ctrl+F)": "Rechercher dans le PDF (Ctrl+F)",
+  "Select PDF Text (X)": "Sélectionner le texte PDF (X)",
+  "%n words": {
+    "one": "%n mot",
+    "many": "%n mots",
+    "other": "%n mots"
+  },
+  "%1 chars": "%1 caractères",
+  "Copy Text": "Copier le texte",
+  "Select All": "Tout sélectionner",
+  "Find": "Rechercher",
+  "Copied text to clipboard": "Texte copié dans le presse-papiers"
 }

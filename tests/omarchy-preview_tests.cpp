@@ -1,7 +1,12 @@
+#include <QClipboard>
 #include <QDir>
 #include <QFile>
+#include <QFont>
+#include <QGuiApplication>
 #include <QImage>
 #include <QImageReader>
+#include <QPainter>
+#include <QPdfWriter>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -54,7 +59,7 @@ public:
 
 } // namespace
 
-class PeekTests : public QObject {
+class PreviewTests : public QObject {
     Q_OBJECT
 
 private slots:
@@ -390,7 +395,7 @@ private slots:
             QCOMPARE(first.printQuality(), QString("High"));
         }
 
-        // Relaunching Peek restores Last Used Settings (with copies reset to 1 for safety)
+        // Relaunching Omarchy Preview restores Last Used Settings (with copies reset to 1 for safety)
         // and keeps all saved custom presets.
         {
             Backend second(nullptr, fakeLpstat, "/nonexistent-lp", fakeLpoptions, storePath);
@@ -467,7 +472,7 @@ private slots:
         // CLI accepts custom WxHmm directly.
         QStringList guiFiles;
         const QString cliPdf = dir.filePath("cli_custom.pdf");
-        const auto code = Cli::run({"peek", "export", imgPath, "-o", cliPdf, "--paper", "100x150mm", "--json"}, guiFiles);
+        const auto code = Cli::run({"omarchy-preview", "export", imgPath, "-o", cliPdf, "--paper", "100x150mm", "--json"}, guiFiles);
         QVERIFY(code.has_value());
         QCOMPARE(*code, 0);
         QVERIFY(readFile(cliPdf).startsWith("%PDF-"));
@@ -594,7 +599,7 @@ private slots:
         QCOMPARE(meta.value("focalLength").toString(), QString("35 mm"));
 
         QStringList guiFiles;
-        const auto code = Cli::run({"peek", "inspect", exifJpgPath, "--json"}, guiFiles);
+        const auto code = Cli::run({"omarchy-preview", "inspect", exifJpgPath, "--json"}, guiFiles);
         QVERIFY(code.has_value());
         QCOMPARE(*code, 0);
     }
@@ -607,14 +612,14 @@ private slots:
         const QString outJpg = dir.filePath("cli_edited.jpg");
 
         QStringList guiFiles;
-        const auto codePdf = Cli::run({"peek", "export", p1, p2, "-o", outPdf,
+        const auto codePdf = Cli::run({"omarchy-preview", "export", p1, p2, "-o", outPdf,
                                        "--paper", "letter", "--per-page", "2", "--cut-guides", "--grayscale", "--json"},
                                       guiFiles);
         QVERIFY(codePdf.has_value());
         QCOMPARE(*codePdf, 0);
         QVERIFY(readFile(outPdf).startsWith("%PDF-"));
 
-        const auto codeImg = Cli::run({"peek", "export", p1, "-o", outJpg,
+        const auto codeImg = Cli::run({"omarchy-preview", "export", p1, "-o", outJpg,
                                        "--crop", "50,50,200,100", "--resize", "100x50", "--quality", "80", "--json"},
                                       guiFiles);
         QVERIFY(codeImg.has_value());
@@ -729,15 +734,220 @@ private slots:
 
         // CLI: inspect PDF & export merged PDFs with --pages.
         QStringList guiFiles;
-        const auto inspectCode = Cli::run({"peek", "inspect", pdfA, "--json"}, guiFiles);
+        const auto inspectCode = Cli::run({"omarchy-preview", "inspect", pdfA, "--json"}, guiFiles);
         QVERIFY(inspectCode.has_value());
         QCOMPARE(*inspectCode, 0);
 
         const QString cliMerged = dir.filePath("cli_slice.pdf");
-        const auto mergeCode = Cli::run({"peek", "export", pdfA, pdfB, "--pages", "1,4", "-o", cliMerged, "--json"}, guiFiles);
+        const auto mergeCode = Cli::run({"omarchy-preview", "export", pdfA, pdfB, "--pages", "1,4", "-o", cliMerged, "--json"}, guiFiles);
         QVERIFY(mergeCode.has_value());
         QCOMPARE(*mergeCode, 0);
         QCOMPARE(PdfDocument::pageCount(cliMerged), 2);
+    }
+
+    void pdfSearchSelectCopyAndCoordinateMapping() {
+        QTemporaryDir dir;
+        const QString pdfPath = makeSearchablePdf(dir.path(), "guide.pdf");
+        QVERIFY(PdfDocument::isPdfFile(pdfPath));
+        QCOMPARE(PdfDocument::pageCount(pdfPath), 2);
+
+        const QString p1Text = PdfDocument::extractPageText(pdfPath, 0);
+        QVERIFY(p1Text.contains("Omarchy"));
+        QVERIFY(p1Text.contains("Preview"));
+
+        const auto words = PdfDocument::extractTextWords(pdfPath, 0);
+        QVERIFY(!words.isEmpty());
+
+        // Round-trip coordinate transform across all rotations + flips.
+        const QSize srcSz(1240, 1754);
+        const QRectF sample(0.2, 0.3, 0.15, 0.04);
+        for (int rot : {0, 90, 180, 270}) {
+            for (bool fh : {false, true}) {
+                for (bool fv : {false, true}) {
+                    const QRectF mapped = PdfDocument::mapPdfNormToDisplay(sample, rot, fh, fv, QRect(), srcSz);
+                    QVERIFY(!mapped.isEmpty());
+                    const QPointF back = PdfDocument::mapDisplayNormToPdf(mapped.center(), rot, fh, fv, QRect(), srcSz);
+                    QVERIFY(std::abs(back.x() - sample.center().x()) < 1e-4);
+                    QVERIFY(std::abs(back.y() - sample.center().y()) < 1e-4);
+                }
+            }
+        }
+
+        Backend backend(nullptr, "/nonexistent/lpstat", "/nonexistent/lp", "/nonexistent/lpoptions", dir.filePath("presets.json"));
+        QVERIFY(backend.openFiles({pdfPath}));
+        QVERIFY(backend.currentPageIsPdf());
+        QVERIFY(backend.currentPageHasText());
+
+        // Cross-page case-insensitive search ("preview" appears on page 1 and page 2).
+        backend.setSearchQuery("preview");
+        QVERIFY(backend.searchMatchCount() >= 2);
+        QCOMPARE(backend.imageIndex(), 0);
+        QVERIFY(!backend.currentPageSearchRects().isEmpty());
+        QVERIFY(backend.activeSearchRect().value("valid").toBool());
+
+        // Advance to next match on page 2, then back to page 1.
+        backend.nextSearchMatch();
+        QCOMPARE(backend.imageIndex(), 1);
+        QVERIFY(!backend.currentPageSearchRects().isEmpty());
+        backend.previousSearchMatch();
+        QCOMPARE(backend.imageIndex(), 0);
+
+        // Case-sensitive search distinguishes "PREVIEW" (0 hits) from "Preview".
+        backend.setSearchCaseSensitive(true);
+        backend.setSearchQuery("PREVIEW");
+        QCOMPARE(backend.searchMatchCount(), 0);
+        backend.setSearchQuery("Preview");
+        QVERIFY(backend.searchMatchCount() >= 2);
+
+        // Rotate page and verify search highlights stay valid in rotated coordinates.
+        const QVariantMap beforeRot = backend.currentPageSearchRects().first().toMap();
+        backend.rotateRight();
+        const QVariantMap afterRot = backend.currentPageSearchRects().first().toMap();
+        QVERIFY(std::abs(afterRot.value("x").toDouble() - beforeRot.value("x").toDouble()) > 0.05 ||
+                std::abs(afterRot.value("y").toDouble() - beforeRot.value("y").toDouble()) > 0.05);
+        backend.undo();
+
+        // Point hover, word select, range select, select all, and copy to clipboard.
+        const QRectF firstWord = words.first().normRect;
+        QVERIFY(backend.isPointOverText(firstWord.center().x(), firstWord.center().y()));
+        backend.selectWordAt(firstWord.center().x(), firstWord.center().y());
+        QVERIFY(backend.hasTextSelection());
+        QCOMPARE(backend.selectedText(), words.first().text);
+        QVERIFY(!backend.textSelectionRects().isEmpty());
+
+        backend.selectAllPageText();
+        QVERIFY(backend.selectedText().contains("Omarchy"));
+        QVERIFY(backend.selectedTextWordCount() >= 4);
+
+        backend.copyToClipboard();
+        QVERIFY(backend.statusMessage().contains("clipboard") || !backend.statusMessage().isEmpty());
+        if (QClipboard *clip = QGuiApplication::clipboard())
+            QVERIFY(clip->text().contains("Omarchy"));
+
+        backend.clearTextSelection();
+        QVERIFY(!backend.hasTextSelection());
+        backend.clearSearch();
+        QCOMPARE(backend.searchMatchCount(), 0);
+
+        // Headless CLI: omarchy-preview search & omarchy-preview text.
+        QStringList guiFiles;
+        const auto searchCode = Cli::run({"omarchy-preview", "search", pdfPath, "preview", "--json"}, guiFiles);
+        QVERIFY(searchCode.has_value());
+        QCOMPARE(*searchCode, 0);
+
+        const auto textCode = Cli::run({"omarchy-preview", "text", pdfPath, "--pages", "2", "--json"}, guiFiles);
+        QVERIFY(textCode.has_value());
+        QCOMPARE(*textCode, 0);
+    }
+
+    void pdfOutlineReadsNavigatesCollapsesAndSurvivesReorder() {
+        QTemporaryDir dir;
+        const QString pdfPath = makeOutlinedPdf(dir.path(), "book.pdf");
+        QVERIFY(PdfDocument::isPdfFile(pdfPath));
+        QCOMPARE(PdfDocument::pageCount(pdfPath), 3);
+
+        const auto rawOutline = PdfDocument::readOutline(pdfPath);
+        QCOMPARE(rawOutline.size(), 3);
+        QCOMPARE(rawOutline.at(0).title, QString("Introduction"));
+        QCOMPARE(rawOutline.at(0).pageIndex, 0);
+        QCOMPARE(rawOutline.at(0).depth, 0);
+        QCOMPARE(rawOutline.at(1).title, QString("Chapter 1"));
+        QCOMPARE(rawOutline.at(1).pageIndex, 1);
+        QCOMPARE(rawOutline.at(1).depth, 0);
+        QVERIFY(rawOutline.at(1).hasChildren);
+        QCOMPARE(rawOutline.at(2).title, QString("Section 1.1"));
+        QCOMPARE(rawOutline.at(2).pageIndex, 2);
+        QCOMPARE(rawOutline.at(2).depth, 1);
+
+        Backend backend(nullptr, "/nonexistent/lpstat", "/nonexistent/lp", "/nonexistent/lpoptions", dir.filePath("presets.json"));
+        QVERIFY(backend.openFiles({pdfPath}));
+        QVERIFY(backend.hasOutline());
+        QCOMPARE(backend.outlineItems().size(), 3);
+
+        // Collapse "Chapter 1" hides its nested child "Section 1.1".
+        backend.toggleOutlineItem(1);
+        QCOMPARE(backend.outlineItems().size(), 2);
+        backend.toggleOutlineItem(1);
+        QCOMPARE(backend.outlineItems().size(), 3);
+
+        // Jump to "Section 1.1" -> page index 2 (page 3).
+        backend.jumpToOutlineItem(2);
+        QCOMPARE(backend.imageIndex(), 2);
+        QVERIFY(backend.outlineItems().at(2).toMap().value("active").toBool());
+
+        // Reorder page 3 (index 2) to the front (index 0) and verify outline tracks the moved page.
+        QVERIFY(backend.movePage(2, 0));
+        QCOMPARE(backend.outlineItems().at(2).toMap().value("entryIndex").toInt(), 0);
+        QCOMPARE(backend.outlineItems().at(2).toMap().value("pageNumber").toInt(), 1);
+        backend.selectIndex(1);
+        backend.jumpToOutlineItem(2);
+        QCOMPARE(backend.imageIndex(), 0);
+
+        // Headless CLI: omarchy-preview outline.
+        QStringList guiFiles;
+        const auto outlineCode = Cli::run({"omarchy-preview", "outline", pdfPath, "--json"}, guiFiles);
+        QVERIFY(outlineCode.has_value());
+        QCOMPARE(*outlineCode, 0);
+    }
+
+    void largePdfOpensQuicklyAndSearchesAsynchronously() {
+        QTemporaryDir dir;
+        const QString bigPdf = dir.filePath("big.pdf");
+        {
+            QPdfWriter writer(bigPdf);
+            writer.setPageSize(QPageSize(QPageSize::A4));
+            writer.setResolution(72);
+            QPainter painter(&writer);
+            painter.setPen(Qt::black);
+            painter.setFont(QFont("Sans", 14));
+            for (int p = 0; p < 24; ++p) {
+                if (p > 0)
+                    writer.newPage();
+                painter.drawText(40, 80, QString("Page %1 body text").arg(p + 1));
+                if (p == 20)
+                    painter.drawText(40, 140, "UniqueNeedleToken");
+            }
+            painter.end();
+        }
+
+        Backend backend(nullptr, "/nonexistent/lpstat", "/nonexistent/lp", "/nonexistent/lpoptions", dir.filePath("presets.json"));
+        QVERIFY(backend.openFiles({bigPdf}));
+        QCOMPARE(backend.imageCount(), 24);
+        QCOMPARE(backend.previewPageCount(), 24);
+        // Only the active preview page should be rasterized, not all 24 pages.
+        QCOMPARE(backend.previewPageImages().size(), 1);
+        QVERIFY(!backend.effectiveLandscape());
+        QVERIFY(backend.paperWidthMm() > 200.0);
+
+        // Large PDF search runs off the main thread and lands on page 21 (index 20).
+        backend.setSearchQuery("UniqueNeedleToken");
+        QTRY_VERIFY(!backend.searchBusy());
+        QCOMPARE(backend.searchMatchCount(), 1);
+        QCOMPARE(backend.imageIndex(), 20);
+    }
+
+    void thaiNormalizationHandlesSpuriousSpacesToneOrderAndSaraAmCMap() {
+        // Spurious spaces inserted by Poppler before Thai combining marks.
+        QCOMPARE(PdfDocument::normalizeThaiText(QString::fromUtf8("คุณรู้จ ักพระเจ้า"), false, false),
+                 QString::fromUtf8("คุณรู้จักพระเจ้า"));
+        QCOMPARE(PdfDocument::normalizeThaiText(QString::fromUtf8("ผู้ฟ ังให้ชีว ิต"), false, false),
+                 QString::fromUtf8("ผู้ฟังให้ชีวิต"));
+
+        // Swapped tone + vowel order ("ท่ี" -> "ที่").
+        QCOMPARE(PdfDocument::normalizeThaiText(QString::fromUtf8("ท\u0E48\u0E35"), false, false),
+                 QString::fromUtf8("ที่"));
+
+        // Decomposed Sara Am (ํ + า -> ำ) and tone + ำ canonical order.
+        QCOMPARE(PdfDocument::normalizeThaiText(QString::fromUtf8("ท\u0E4D\u0E32งาน"), false, false),
+                 QString::fromUtf8("ทำงาน"));
+        QCOMPARE(PdfDocument::normalizeThaiText(QString::fromUtf8("น\u0E4D\u0E49\u0E32"), false, false),
+                 QString::fromUtf8("น้ำ"));
+
+        // CMap-conflated Sara Am <-> Sara Aa search equivalence ("ทำงาน" matches "ทางาน" & "ทำงำน").
+        const QString qFold = PdfDocument::normalizeThaiText(QString::fromUtf8("ทำงาน"), true, true);
+        QCOMPARE(PdfDocument::normalizeThaiText(QString::fromUtf8("ทางาน"), true, true), qFold);
+        QCOMPARE(PdfDocument::normalizeThaiText(QString::fromUtf8("ทำงำน"), true, true), qFold);
+        QCOMPARE(PdfDocument::normalizeThaiText(QString::fromUtf8("ท ำ งาน"), true, true), qFold);
     }
 
     void themeFallsBack() {
@@ -815,7 +1025,71 @@ private:
         const QString fullPath = QDir(dir).filePath(name);
         return img.save(fullPath) ? fullPath : QString();
     }
+
+    static QString makeSearchablePdf(const QString &dir, const QString &name) {
+        const QString fullPath = QDir(dir).filePath(name);
+        QPdfWriter writer(fullPath);
+        writer.setPageSize(QPageSize(QPageSize::A4));
+        writer.setResolution(150);
+        writer.setTitle("Omarchy Preview Guide");
+
+        QPainter painter(&writer);
+        painter.setPen(Qt::black);
+        QFont titleFont("Sans", 20, QFont::Bold);
+        QFont bodyFont("Sans", 13);
+
+        painter.setFont(titleFont);
+        painter.drawText(QRect(80, 120, 1000, 100), Qt::AlignLeft | Qt::AlignTop, "Omarchy Preview Guide");
+        painter.setFont(bodyFont);
+        painter.drawText(QRect(80, 260, 1000, 120), Qt::AlignLeft | Qt::AlignTop, "Quick printing and live PDF search.");
+
+        writer.newPage();
+        painter.setFont(titleFont);
+        painter.drawText(QRect(80, 120, 1000, 100), Qt::AlignLeft | Qt::AlignTop, "Chapter Two Summary");
+        painter.setFont(bodyFont);
+        painter.drawText(QRect(80, 260, 1000, 120), Qt::AlignLeft | Qt::AlignTop, "Preview finds matches across pages cleanly.");
+        painter.end();
+        return fullPath;
+    }
+
+    static QString makeOutlinedPdf(const QString &dir, const QString &name) {
+        // Minimal valid PDF 1.4 with 3 pages and a nested /Outlines tree:
+        //   Introduction (page 1)
+        //   Chapter 1 (page 2)
+        //     Section 1.1 (page 3)
+        QList<QByteArray> objects;
+        objects << "<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>"                                      // 1
+                << "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>"                                 // 2
+                << "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>"                               // 3 (p1)
+                << "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>"                               // 4 (p2)
+                << "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>"                               // 5 (p3)
+                << "<< /Type /Outlines /First 7 0 R /Last 8 0 R /Count 3 >>"                               // 6
+                << "<< /Title (Introduction) /Parent 6 0 R /Next 8 0 R /Dest [3 0 R /Fit] >>"              // 7
+                << "<< /Title (Chapter 1) /Parent 6 0 R /Prev 7 0 R /First 9 0 R /Last 9 0 R /Count 1 /Dest [4 0 R /Fit] >>" // 8
+                << "<< /Title (Section 1.1) /Parent 8 0 R /Dest [5 0 R /Fit] >>";                          // 9
+
+        QByteArray pdf = "%PDF-1.4\n";
+        QVector<int> offsets;
+        offsets.append(0);
+        for (int i = 0; i < objects.size(); ++i) {
+            offsets.append(pdf.size());
+            pdf.append(QByteArray::number(i + 1) + " 0 obj\n" + objects.at(i) + "\nendobj\n");
+        }
+        const int xrefOffset = pdf.size();
+        pdf.append("xref\n0 " + QByteArray::number(objects.size() + 1) + "\n");
+        pdf.append("0000000000 65535 f \n");
+        for (int i = 1; i < offsets.size(); ++i) {
+            QByteArray num = QByteArray::number(offsets.at(i)).rightJustified(10, '0');
+            pdf.append(num + " 00000 n \n");
+        }
+        pdf.append("trailer\n<< /Size " + QByteArray::number(objects.size() + 1) + " /Root 1 0 R >>\n");
+        pdf.append("startxref\n" + QByteArray::number(xrefOffset) + "\n%%EOF\n");
+
+        const QString fullPath = QDir(dir).filePath(name);
+        write(fullPath, pdf);
+        return fullPath;
+    }
 };
 
-QTEST_MAIN(PeekTests)
-#include "peek_tests.moc"
+QTEST_MAIN(PreviewTests)
+#include "omarchy-preview_tests.moc"

@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
-import Peek 1.0
+import OmarchyPreview 1.0
 
 // macOS Preview-style print sheet: live N-up/multi-page proof on the left,
 // clean print and CUPS printer controls on the right.

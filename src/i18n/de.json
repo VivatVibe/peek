@@ -143,5 +143,30 @@
   "PDF page %1 is out of range.": "PDF-Seite %1 liegt außerhalb des Bereichs.",
   "Could not load PDF page %1.": "PDF-Seite %1 konnte nicht geladen werden.",
   "Could not render PDF page %1.": "PDF-Seite %1 konnte nicht gerendert werden.",
-  "Could not render page %1 of %2": "Seite %1 von %2 konnte nicht gerendert werden"
+  "Could not render page %1 of %2": "Seite %1 von %2 konnte nicht gerendert werden",
+  "Find in PDF…": "In PDF suchen…",
+  "Searching…": "Suche…",
+  "No matches": "Keine Treffer",
+  "Match Case": "Groß-/Kleinschreibung",
+  "Previous Match (Shift+Enter)": "Vorheriger Treffer (Shift+Enter)",
+  "Next Match (Enter)": "Nächster Treffer (Enter)",
+  "Close (Esc)": "Schließen (Esc)",
+  "Thumbnails": "Miniaturen",
+  "Outline": "Gliederung",
+  "No table of contents in this PDF.": "Kein Inhaltsverzeichnis in dieser PDF.",
+  "Toggle PDF Outline / TOC": "PDF-Gliederung umschalten",
+  "Find Text in PDF": "Text in PDF suchen",
+  "Next / Previous Match": "Nächster / vorheriger Treffer",
+  "Toggle PDF Text Selection": "PDF-Textauswahl umschalten",
+  "Find in PDF (Ctrl+F)": "In PDF suchen (Ctrl+F)",
+  "Select PDF Text (X)": "PDF-Text auswählen (X)",
+  "%n words": {
+    "one": "%n Wort",
+    "other": "%n Wörter"
+  },
+  "%1 chars": "%1 Zeichen",
+  "Copy Text": "Text kopieren",
+  "Select All": "Alles auswählen",
+  "Find": "Suchen",
+  "Copied text to clipboard": "Text in Zwischenablage kopiert"
 }

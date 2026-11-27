@@ -3,23 +3,117 @@ import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
 
-// Collapsible thumbnail strip for stepping through a folder or PDF,
-// multi-selecting for N-up printing, and organizing/merging PDF pages.
+// Collapsible thumbnail & outline strip for stepping through a folder or PDF,
+// browsing the PDF Table of Contents, multi-selecting for N-up printing,
+// and organizing/merging PDF pages.
 Rectangle {
     id: sidebar
 
     signal imagePicked()
 
+    property string mode: "pages" // pages | outline
+
     color: "#141419"
+
+    Connections {
+        target: backend
+        function onFilesChanged() {
+            if (!backend.isPdfMode && sidebar.mode === "outline")
+                sidebar.mode = "pages"
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        // Header showing count and batch-select shortcuts.
+        // Mode switcher (Pages | Outline) in PDF mode.
         Rectangle {
+            visible: backend.isPdfMode
             Layout.fillWidth: true
-            Layout.preferredHeight: 40
+            Layout.preferredHeight: 36
+            color: "#191920"
+
+            MouseArea {
+                anchors.fill: parent
+                onWheel: function(wheel) { wheel.accepted = true }
+            }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                anchors.topMargin: 5
+                anchors.bottomMargin: 5
+                spacing: 4
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: Math.min(4, theme.radius)
+                    color: sidebar.mode === "pages" ? theme.accent : (pagesTabMa.containsMouse ? "#252530" : "#15151b")
+                    border.color: sidebar.mode === "pages" ? theme.accent : "#2a2a34"
+                    border.width: 1
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: qsTr("Thumbnails")
+                        color: sidebar.mode === "pages" ? theme.accentForeground : "#c8c8d4"
+                        font.pixelSize: 11
+                        font.weight: sidebar.mode === "pages" ? Font.DemiBold : Font.Normal
+                        elide: Text.ElideRight
+                    }
+
+                    MouseArea {
+                        id: pagesTabMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: sidebar.mode = "pages"
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: Math.min(4, theme.radius)
+                    color: sidebar.mode === "outline" ? theme.accent : (outlineTabMa.containsMouse ? "#252530" : "#15151b")
+                    border.color: sidebar.mode === "outline" ? theme.accent : "#2a2a34"
+                    border.width: 1
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: qsTr("Outline")
+                        color: sidebar.mode === "outline" ? theme.accentForeground : (backend.hasOutline ? "#c8c8d4" : "#6e6e7a")
+                        font.pixelSize: 11
+                        font.weight: sidebar.mode === "outline" ? Font.DemiBold : Font.Normal
+                        elide: Text.ElideRight
+                    }
+
+                    MouseArea {
+                        id: outlineTabMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: sidebar.mode = "outline"
+                    }
+                }
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: "#26262e"
+            }
+        }
+
+        // Header showing count and batch-select shortcuts (Pages mode).
+        Rectangle {
+            visible: sidebar.mode === "pages"
+            Layout.fillWidth: true
+            Layout.preferredHeight: 36
             color: "#191920"
 
             MouseArea {
@@ -86,14 +180,24 @@ Rectangle {
         // Scrollable thumbnail list; each delegate is full-width and centered.
         ListView {
             id: thumbList
+            visible: sidebar.mode === "pages"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            cacheBuffer: 240
             spacing: 8
             topMargin: 10
             bottomMargin: 10
             model: backend.fileItems
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            Connections {
+                target: backend
+                function onImageChanged() {
+                    if (sidebar.mode === "pages" && backend.imageIndex >= 0 && backend.imageIndex < thumbList.count)
+                        thumbList.positionViewAtIndex(backend.imageIndex, ListView.Contain)
+                }
+            }
 
             delegate: Item {
                 required property var modelData
@@ -124,7 +228,7 @@ Rectangle {
 
                             Image {
                                 anchors.fill: parent
-                                source: "image://peek/thumb/" + modelData.index + "?v=" + backend.fileListVersion + "_" + (isCurrent ? backend.imageVersion : 0)
+                                source: "image://preview/thumb/" + modelData.index + "?v=" + backend.fileListVersion + "_" + (isCurrent ? backend.imageVersion : 0)
                                 fillMode: Image.PreserveAspectFit
                                 asynchronous: true
                                 cache: false
@@ -199,8 +303,128 @@ Rectangle {
             }
         }
 
+        // PDF Table of Contents (Outline) view.
+        Item {
+            visible: sidebar.mode === "outline"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+
+            Text {
+                visible: !backend.hasOutline
+                anchors.centerIn: parent
+                width: parent.width - 28
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                text: qsTr("No table of contents in this PDF.")
+                color: "#7a7a88"
+                font.pixelSize: 12
+            }
+
+            ListView {
+                id: outlineList
+                visible: backend.hasOutline
+                anchors.fill: parent
+                clip: true
+                topMargin: 6
+                bottomMargin: 8
+                spacing: 2
+                model: backend.outlineItems
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                delegate: Item {
+                    required property var modelData
+                    readonly property bool isActive: modelData.active
+                    readonly property bool canJump: modelData.entryIndex >= 0
+
+                    width: outlineList.width
+                    height: 30
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.leftMargin: 6
+                        anchors.rightMargin: 6
+                        radius: Math.min(4, theme.radius)
+                        color: isActive ? "#23232f" : (tocMa.containsMouse && canJump ? "#1c1c25" : "transparent")
+
+                        // Active section accent indicator.
+                        Rectangle {
+                            visible: isActive
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.topMargin: 5
+                            anchors.bottomMargin: 5
+                            width: 3
+                            radius: Math.min(2, theme.radius)
+                            color: theme.accent
+                        }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8 + Math.min(modelData.depth, 5) * 12
+                            anchors.rightMargin: 8
+                            spacing: 4
+
+                            Item {
+                                Layout.preferredWidth: 16
+                                Layout.preferredHeight: 20
+
+                                Text {
+                                    visible: modelData.hasChildren
+                                    anchors.centerIn: parent
+                                    text: modelData.expanded ? "▾" : "▸"
+                                    color: "#9a9aa8"
+                                    font.pixelSize: 11
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    enabled: modelData.hasChildren
+                                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    onClicked: backend.toggleOutlineItem(modelData.id)
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.title
+                                color: isActive ? "#f6f6fa" : (canJump ? "#d0d0dc" : "#747482")
+                                font.pixelSize: 12
+                                font.weight: (isActive || modelData.depth === 0) ? Font.DemiBold : Font.Normal
+                                elide: Text.ElideRight
+                            }
+
+                            Text {
+                                visible: modelData.pageNumber > 0
+                                text: {
+                                    void translator.language
+                                    return Number(modelData.pageNumber).toLocaleString(Qt.locale(), 'f', 0)
+                                }
+                                color: isActive ? theme.accent : "#7e7e8c"
+                                font.pixelSize: 11
+                            }
+                        }
+
+                        MouseArea {
+                            id: tocMa
+                            anchors.fill: parent
+                            anchors.leftMargin: 24 + Math.min(modelData.depth, 5) * 12
+                            hoverEnabled: true
+                            enabled: canJump
+                            cursorShape: canJump ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: {
+                                backend.jumpToOutlineItem(modelData.id)
+                                sidebar.imagePicked()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Compact page organization footer: Merge, Move Up, Move Down, Delete.
         Rectangle {
+            visible: sidebar.mode === "pages"
             Layout.fillWidth: true
             Layout.preferredHeight: 38
             color: "#191920"

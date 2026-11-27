@@ -1,4 +1,4 @@
-// peek — Image preview and effortless printing for Omarchy.
+// omarchy-preview — Image & PDF preview and effortless printing for Omarchy.
 
 #include <QGuiApplication>
 #include <QIcon>
@@ -21,17 +21,17 @@ int main(int argc, char *argv[]) {
         qputenv("QT_QPA_PLATFORM", "offscreen");
 
     QGuiApplication app(argc, argv);
-    app.setApplicationName("peek");
-    app.setApplicationVersion("0.6.0");
+    app.setApplicationName("omarchy-preview");
+    app.setApplicationVersion("0.7.0");
 
     QStringList guiFiles;
     if (const auto exitCode = Cli::run(app.arguments(), guiFiles))
         return *exitCode;
 
-    // Matches the window to peek.desktop, so the compositor (Wayland app_id)
+    // Matches the window to omarchy-preview.desktop, so the compositor (Wayland app_id)
     // and the launcher pick up the installed icon.
-    app.setDesktopFileName("peek");
-    app.setWindowIcon(QIcon::fromTheme("peek"));
+    app.setDesktopFileName("omarchy-preview");
+    app.setWindowIcon(QIcon::fromTheme("omarchy-preview"));
 
     QQuickStyle::setStyle("Material");
 
@@ -46,11 +46,11 @@ int main(int argc, char *argv[]) {
     if (!guiFiles.isEmpty())
         backend.openFiles(guiFiles);
 
-    qmlRegisterType<PrintPreviewItem>("Peek", 1, 0, "PrintPreview");
-    qmlRegisterType<MarkupDraftItem>("Peek", 1, 0, "MarkupDraft");
+    qmlRegisterType<PrintPreviewItem>("OmarchyPreview", 1, 0, "PrintPreview");
+    qmlRegisterType<MarkupDraftItem>("OmarchyPreview", 1, 0, "MarkupDraft");
 
     QQmlApplicationEngine engine;
-    engine.addImageProvider("peek", new PeekImageProvider(&backend));
+    engine.addImageProvider("preview", new PreviewImageProvider(&backend));
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);

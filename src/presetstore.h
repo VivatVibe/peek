@@ -23,7 +23,7 @@ struct PrintPreset {
 };
 
 // Persists "Last Used Settings", export defaults, and named user print presets
-// to ~/.config/peek/presets.json using atomic writes. Tests pass a temp path.
+// to ~/.config/omarchy-preview/presets.json using atomic writes. Tests pass a temp path.
 class PresetStore {
 public:
     explicit PresetStore(const QString &filePath = {});

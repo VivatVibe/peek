@@ -14,7 +14,7 @@ namespace {
 
 QString defaultStorePath() {
     const QString cfg = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
-    return QDir(cfg.isEmpty() ? QDir::homePath() + "/.config" : cfg).filePath("peek/presets.json");
+    return QDir(cfg.isEmpty() ? QDir::homePath() + "/.config" : cfg).filePath("omarchy-preview/presets.json");
 }
 
 QString slugify(const QString &name) {

@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
-import Peek 1.0
+import OmarchyPreview 1.0
 
 ApplicationWindow {
     id: win
@@ -11,7 +11,7 @@ ApplicationWindow {
     minimumWidth: 740
     minimumHeight: 500
     visible: true
-    title: backend.hasImage ? (backend.hasUnsavedEdits ? "• " : "") + backend.fileName + " — Peek" : "Peek"
+    title: backend.hasImage ? (backend.hasUnsavedEdits ? "• " : "") + backend.fileName + " — Omarchy Preview" : "Omarchy Preview"
     color: "#0e0e10"
 
     Material.theme: Material.Dark
@@ -30,6 +30,8 @@ ApplicationWindow {
     property bool exportVisible: false
     property bool quitConfirmVisible: false
     property bool sidebarVisible: false
+    property bool findVisible: false
+    property bool textSelectMode: false
     property bool lastPdfMode: false
     property string lastDocPath: ""
     property bool selectMode: false
@@ -37,7 +39,7 @@ ApplicationWindow {
     property bool showCheckerboard: false
 
     readonly property bool modalOpen: helpVisible || printVisible || resizeVisible || exportVisible || quitConfirmVisible
-    readonly property bool typingText: textCalloutOpen || printSheet.savingPreset || printSheet.editingCustomPaper || printSheet.editingPageRange || resizeVisible
+    readonly property bool typingText: textCalloutOpen || findBar.inputActiveFocus || printSheet.savingPreset || printSheet.editingCustomPaper || printSheet.editingPageRange || resizeVisible
 
     // Viewer zoom/pan state.
     property string zoomMode: "fit"
@@ -139,6 +141,48 @@ ApplicationWindow {
         exportVisible = true
     }
 
+    function openFindBar() {
+        if (!backend.isPdfMode)
+            return
+        closeAllModals()
+        findVisible = true
+        const seed = (backend.hasTextSelection && backend.selectedText.indexOf("\n") < 0 && backend.selectedText.length <= 80)
+                     ? backend.selectedText
+                     : ""
+        findBar.focusInput(seed)
+    }
+
+    function closeFindBar() {
+        findVisible = false
+        backend.clearSearch()
+    }
+
+    function toggleOutlineSidebar() {
+        if (!backend.isPdfMode)
+            return
+        if (sidebarVisible && sidebar.mode === "outline") {
+            sidebarVisible = false
+        } else {
+            sidebar.mode = "outline"
+            sidebarVisible = true
+        }
+    }
+
+    function ensureActiveSearchVisible() {
+        if (zoomMode !== "manual")
+            return
+        const r = backend.activeSearchRect
+        if (!r || !r.valid)
+            return
+        const cx = imageFrame.x + (r.x + r.width / 2) * imageFrame.width
+        const cy = imageFrame.y + (r.y + r.height / 2) * imageFrame.height
+        const margin = 64
+        if (cx < margin || cx > canvasArea.width - margin)
+            panX += (canvasArea.width / 2) - cx
+        if (cy < margin || cy > canvasArea.height - margin)
+            panY += (canvasArea.height / 2) - cy
+    }
+
     function requestQuit() {
         backend.commitColorEdit()
         if (backend.hasUnsavedEdits) {
@@ -161,8 +205,15 @@ ApplicationWindow {
             if (backend.isPdfMode && backend.imageCount > 1 && (!win.lastPdfMode || win.lastDocPath !== backend.filePath)) {
                 win.sidebarVisible = true
             }
+            if (!backend.isPdfMode) {
+                win.findVisible = false
+                win.textSelectMode = false
+            }
             win.lastPdfMode = backend.isPdfMode
             win.lastDocPath = backend.filePath
+        }
+        function onSearchChanged() {
+            win.ensureActiveSearchVisible()
         }
     }
 
@@ -196,14 +247,23 @@ ApplicationWindow {
             else if (printSheet.savingPreset) printSheet.savingPreset = false
             else if (printSheet.editingCustomPaper) printSheet.editingCustomPaper = false
             else if (win.modalOpen) win.closeAllModals()
+            else if (win.findVisible) win.closeFindBar()
+            else if (backend.hasTextSelection) backend.clearTextSelection()
             else if (win.colorVisible) { backend.commitColorEdit(); win.colorVisible = false }
             else if (win.inspectorVisible) win.inspectorVisible = false
             else if (win.markupMode) { markupDraft.clear(); win.markupMode = false }
             else if (backend.hasSelection) { backend.clearSelection(); win.selectMode = false }
             else if (win.selectMode) win.selectMode = false
+            else if (win.textSelectMode) win.textSelectMode = false
             else if (backend.errorMessage.length > 0) backend.clearMessages()
         }
     }
+    Shortcut { sequences: [StandardKey.Find]; context: Qt.ApplicationShortcut; enabled: backend.isPdfMode && !win.modalOpen; onActivated: win.openFindBar() }
+    Shortcut { sequence: "/"; context: Qt.ApplicationShortcut; enabled: backend.isPdfMode && !win.modalOpen && !win.typingText; onActivated: win.openFindBar() }
+    Shortcut { sequences: ["F3", "Ctrl+G"]; context: Qt.ApplicationShortcut; enabled: backend.isPdfMode && backend.searchMatchCount > 0 && !win.modalOpen; onActivated: backend.nextSearchMatch() }
+    Shortcut { sequences: ["Shift+F3", "Ctrl+Shift+G"]; context: Qt.ApplicationShortcut; enabled: backend.isPdfMode && backend.searchMatchCount > 0 && !win.modalOpen; onActivated: backend.previousSearchMatch() }
+    Shortcut { sequence: "B"; context: Qt.ApplicationShortcut; enabled: backend.isPdfMode && !win.modalOpen && !win.typingText; onActivated: win.toggleOutlineSidebar() }
+    Shortcut { sequence: "X"; context: Qt.ApplicationShortcut; enabled: backend.currentPageIsPdf && !win.modalOpen && !win.typingText; onActivated: { win.markupMode = false; win.selectMode = false; win.textSelectMode = !win.textSelectMode } }
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.modalOpen && !win.typingText; onActivated: win.openPrintSheet() }
     Shortcut { sequences: [StandardKey.Print, "P"]; context: Qt.ApplicationShortcut; enabled: !win.helpVisible && !win.resizeVisible && !win.exportVisible && !win.typingText; onActivated: { if (win.printVisible) win.printVisible = false; else win.openPrintSheet() } }
     Shortcut { sequences: ["Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && !printSheet.savingPreset && !printSheet.editingCustomPaper && !printSheet.editingPageRange && backend.pageRangeValid && !backend.printBusy && backend.printer.length > 0; onActivated: { backend.printCurrent(); win.printVisible = false } }
@@ -216,13 +276,26 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Up"; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen && !win.typingText; onActivated: backend.moveCurrentPageUp() }
     Shortcut { sequence: "Ctrl+Down"; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen && !win.typingText; onActivated: backend.moveCurrentPageDown() }
     Shortcut { sequence: "Delete"; context: Qt.ApplicationShortcut; enabled: backend.isPdfMode && backend.imageCount > 1 && !win.modalOpen && !win.typingText; onActivated: backend.deleteCurrentPage() }
-    Shortcut { sequence: "M"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.selectMode = false; win.markupMode = !win.markupMode } }
+    Shortcut { sequence: "M"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.selectMode = false; win.textSelectMode = false; win.markupMode = !win.markupMode } }
     Shortcut { sequence: "I"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.colorVisible = false; win.inspectorVisible = !win.inspectorVisible } }
     Shortcut { sequence: "Ctrl+K"; context: Qt.ApplicationShortcut; enabled: backend.hasSelection && !win.modalOpen && !win.typingText; onActivated: { backend.cropToSelection(); win.selectMode = false; win.resetView() } }
     Shortcut { sequences: [StandardKey.Copy]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: backend.copyToClipboard() }
     Shortcut { sequence: "Tab"; context: Qt.ApplicationShortcut; enabled: (backend.imageCount > 1 || backend.isPdfMode) && !win.modalOpen && !win.typingText; onActivated: win.sidebarVisible = !win.sidebarVisible }
-    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.markupMode = false; win.selectMode = !win.selectMode } }
-    Shortcut { sequences: [StandardKey.SelectAll]; context: Qt.ApplicationShortcut; enabled: backend.imageCount > 1 && !win.modalOpen && !win.typingText; onActivated: { win.sidebarVisible = true; backend.selectAllFiles() } }
+    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.markupMode = false; win.textSelectMode = false; win.selectMode = !win.selectMode } }
+    Shortcut {
+        sequences: [StandardKey.SelectAll]
+        context: Qt.ApplicationShortcut
+        enabled: !win.modalOpen && !win.typingText && (backend.imageCount > 1 || (backend.currentPageIsPdf && backend.currentPageHasText))
+        onActivated: {
+            if (backend.currentPageIsPdf && backend.currentPageHasText && (win.textSelectMode || backend.hasTextSelection)) {
+                backend.selectAllPageText()
+            } else if (backend.imageCount > 1) {
+                win.sidebarVisible = true
+                sidebar.mode = "pages"
+                backend.selectAllFiles()
+            }
+        }
+    }
     Shortcut { sequences: ["PgDown"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && backend.previewPageCount > 1; onActivated: backend.nextPreviewPage() }
     Shortcut { sequences: ["PgUp"]; context: Qt.ApplicationShortcut; enabled: win.printVisible && backend.previewPageCount > 1; onActivated: backend.previousPreviewPage() }
     Shortcut { sequences: ["Right", "L"]; context: Qt.ApplicationShortcut; enabled: backend.hasImage && !win.modalOpen && !win.typingText; onActivated: { win.resetView(); backend.nextImage() } }
@@ -257,8 +330,9 @@ ApplicationWindow {
                 spacing: 0
 
                 ThumbnailSidebar {
+                    id: sidebar
                     visible: win.sidebarVisible && (backend.imageCount > 1 || backend.isPdfMode)
-                    Layout.preferredWidth: 180
+                    Layout.preferredWidth: sidebar.mode === "outline" ? 236 : 184
                     Layout.fillHeight: true
                     onImagePicked: win.resetView()
                 }
@@ -406,7 +480,7 @@ ApplicationWindow {
                             height: Math.max(1, backend.imageHeight * win.effectiveScale)
                             x: (canvasArea.width - width) / 2 + win.panX
                             y: (canvasArea.height - height) / 2 + win.panY
-                            source: backend.hasImage ? ("image://peek/current?v=" + backend.imageVersion) : ""
+                            source: backend.hasImage ? ("image://preview/current?v=" + backend.imageVersion) : ""
                             cache: false
                             asynchronous: false
                             smooth: true
@@ -414,19 +488,83 @@ ApplicationWindow {
                             fillMode: Image.Stretch
                         }
 
+                        // PDF search match highlights overlaid on imageFrame.
+                        Item {
+                            visible: backend.currentPageIsPdf && backend.searchMatchCount > 0
+                            x: imageFrame.x
+                            y: imageFrame.y
+                            width: imageFrame.width
+                            height: imageFrame.height
+
+                            Repeater {
+                                model: backend.currentPageSearchRects
+
+                                Rectangle {
+                                    required property var modelData
+                                    x: modelData.x * parent.width - 2
+                                    y: modelData.y * parent.height - 1
+                                    width: Math.max(4, modelData.width * parent.width + 4)
+                                    height: Math.max(4, modelData.height * parent.height + 2)
+                                    radius: Math.min(3, theme.radius)
+                                    color: modelData.active ? theme.accent : "#ffd60a"
+                                    opacity: modelData.active ? 0.55 : 0.28
+                                    border.color: modelData.active ? theme.accent : "#ffb800"
+                                    border.width: modelData.active ? 2 : 1
+                                }
+                            }
+                        }
+
+                        // PDF text selection highlights overlaid on imageFrame.
+                        Item {
+                            visible: backend.currentPageIsPdf && backend.hasTextSelection
+                            x: imageFrame.x
+                            y: imageFrame.y
+                            width: imageFrame.width
+                            height: imageFrame.height
+
+                            Repeater {
+                                model: backend.textSelectionRects
+
+                                Rectangle {
+                                    required property var modelData
+                                    x: modelData.x * parent.width - 1
+                                    y: modelData.y * parent.height - 1
+                                    width: Math.max(3, modelData.width * parent.width + 2)
+                                    height: Math.max(4, modelData.height * parent.height + 2)
+                                    radius: Math.min(2, theme.radius)
+                                    color: theme.accent
+                                    opacity: 0.34
+                                }
+                            }
+                        }
+
                         MouseArea {
                             id: panArea
                             anchors.fill: parent
                             enabled: !win.modalOpen
+                            hoverEnabled: true
                             acceptedButtons: Qt.LeftButton
-                            cursorShape: (win.markupMode || win.selectMode || win.draggingSelection)
-                                         ? Qt.CrossCursor
-                                         : (pressed ? Qt.ClosedHandCursor : (win.zoomMode === "manual" ? Qt.OpenHandCursor : Qt.ArrowCursor))
+                            cursorShape: {
+                                if (win.markupMode || win.selectMode || win.draggingSelection)
+                                    return Qt.CrossCursor
+                                if (isTextSelectingDrag || (backend.currentPageIsPdf && (win.textSelectMode || hoveringText)))
+                                    return Qt.IBeamCursor
+                                return pressed ? Qt.ClosedHandCursor : (win.zoomMode === "manual" ? Qt.OpenHandCursor : Qt.ArrowCursor)
+                            }
 
                             property real lastX: 0
                             property real lastY: 0
                             property bool isSelectingDrag: false
                             property bool isMarkupDrag: false
+                            property bool isTextSelectingDrag: false
+                            property bool hoveringText: false
+                            property real textStartNormX: 0
+                            property real textStartNormY: 0
+                            property bool textMoved: false
+                            property double lastClickMs: 0
+                            property int clickStreak: 0
+                            property real lastClickX: 0
+                            property real lastClickY: 0
 
                             function toImageNormX(px) {
                                 return Math.max(0.0, Math.min(1.0, (px - imageFrame.x) / Math.max(1.0, imageFrame.width)))
@@ -434,12 +572,20 @@ ApplicationWindow {
                             function toImageNormY(py) {
                                 return Math.max(0.0, Math.min(1.0, (py - imageFrame.y) / Math.max(1.0, imageFrame.height)))
                             }
+                            function insideImage(px, py) {
+                                return px >= imageFrame.x && px <= imageFrame.x + imageFrame.width &&
+                                       py >= imageFrame.y && py <= imageFrame.y + imageFrame.height
+                            }
+
+                            onExited: hoveringText = false
 
                             onPressed: function(mouse) {
                                 lastX = mouse.x
                                 lastY = mouse.y
                                 isSelectingDrag = false
                                 isMarkupDrag = false
+                                isTextSelectingDrag = false
+                                textMoved = false
 
                                 if (win.markupMode) {
                                     const nx = toImageNormX(mouse.x)
@@ -463,12 +609,49 @@ ApplicationWindow {
                                     win.dragStartNormY = toImageNormY(mouse.y)
                                     win.dragCurNormX = win.dragStartNormX
                                     win.dragCurNormY = win.dragStartNormY
+                                } else if (backend.currentPageIsPdf && backend.currentPageHasText &&
+                                           !(mouse.modifiers & Qt.AltModifier) &&
+                                           insideImage(mouse.x, mouse.y) &&
+                                           (win.textSelectMode || backend.isPointOverText(toImageNormX(mouse.x), toImageNormY(mouse.y)))) {
+                                    const nx = toImageNormX(mouse.x)
+                                    const ny = toImageNormY(mouse.y)
+                                    const now = Date.now()
+                                    if (now - lastClickMs < 420 && Math.hypot(mouse.x - lastClickX, mouse.y - lastClickY) < 12)
+                                        clickStreak += 1
+                                    else
+                                        clickStreak = 1
+                                    lastClickMs = now
+                                    lastClickX = mouse.x
+                                    lastClickY = mouse.y
+
+                                    if (clickStreak === 2) {
+                                        backend.selectWordAt(nx, ny)
+                                    } else if (clickStreak >= 3) {
+                                        backend.selectLineAt(nx, ny)
+                                        clickStreak = 0
+                                    } else {
+                                        isTextSelectingDrag = true
+                                        textStartNormX = nx
+                                        textStartNormY = ny
+                                    }
+                                } else {
+                                    if (backend.hasTextSelection)
+                                        backend.clearTextSelection()
                                 }
                             }
 
                             onPositionChanged: function(mouse) {
-                                if (!pressed || !backend.hasImage)
+                                if (!backend.hasImage)
                                     return
+                                if (!pressed) {
+                                    if (backend.currentPageIsPdf && backend.currentPageHasText &&
+                                        !win.markupMode && !win.selectMode && insideImage(mouse.x, mouse.y)) {
+                                        hoveringText = backend.isPointOverText(toImageNormX(mouse.x), toImageNormY(mouse.y))
+                                    } else {
+                                        hoveringText = false
+                                    }
+                                    return
+                                }
                                 if (isMarkupDrag) {
                                     markupDraft.updateStroke(toImageNormX(mouse.x), toImageNormY(mouse.y))
                                 } else if (isSelectingDrag) {
@@ -483,6 +666,11 @@ ApplicationWindow {
                                     }
                                     win.dragCurNormX = nx
                                     win.dragCurNormY = ny
+                                } else if (isTextSelectingDrag) {
+                                    if (!textMoved && Math.hypot(mouse.x - lastX, mouse.y - lastY) >= 3)
+                                        textMoved = true
+                                    if (textMoved)
+                                        backend.selectTextRange(textStartNormX, textStartNormY, toImageNormX(mouse.x), toImageNormY(mouse.y))
                                 } else {
                                     win.zoomMode = "manual"
                                     win.zoomScale = win.effectiveScale
@@ -505,11 +693,19 @@ ApplicationWindow {
                                     const w = Math.abs(win.dragCurNormX - win.dragStartNormX)
                                     const h = Math.abs(win.dragCurNormY - win.dragStartNormY)
                                     backend.setSelectionRect(x, y, w, h)
+                                } else if (isTextSelectingDrag) {
+                                    isTextSelectingDrag = false
+                                    if (!textMoved)
+                                        backend.clearTextSelection()
                                 }
                             }
 
-                            onDoubleClicked: {
-                                if (win.selectMode || win.markupMode)
+                            onDoubleClicked: function(mouse) {
+                                if (win.selectMode || win.markupMode || win.textSelectMode)
+                                    return
+                                if (backend.currentPageIsPdf && backend.currentPageHasText &&
+                                    insideImage(mouse.x, mouse.y) &&
+                                    backend.isPointOverText(toImageNormX(mouse.x), toImageNormY(mouse.y)))
                                     return
                                 if (win.zoomMode === "fit")
                                     win.setActualSize()
@@ -785,11 +981,108 @@ ApplicationWindow {
                             }
                         }
 
+                        // Floating PDF Find Bar docked at top-right of canvas.
+                        FindBar {
+                            id: findBar
+                            visible: win.findVisible && backend.isPdfMode && !win.modalOpen
+                            anchors.top: parent.top
+                            anchors.topMargin: win.markupMode ? 62 : 12
+                            anchors.right: parent.right
+                            anchors.rightMargin: 14
+                            onCloseRequested: win.closeFindBar()
+                            onMatchNavigated: win.ensureActiveSearchVisible()
+                        }
+
+                        // Floating action bar for selected PDF text: Copy, Select All, Find.
+                        Rectangle {
+                            visible: backend.hasTextSelection && !panArea.isTextSelectingDrag && !win.modalOpen
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 14
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: textSelBarRow.implicitWidth + 24
+                            height: 36
+                            radius: Math.min(4, theme.radius)
+                            color: "#e618181f"
+                            border.color: theme.accent
+                            border.width: 1
+
+                            MouseArea {
+                                anchors.fill: parent
+                                onWheel: function(wheel) { wheel.accepted = true }
+                            }
+
+                            RowLayout {
+                                id: textSelBarRow
+                                anchors.centerIn: parent
+                                spacing: 12
+
+                                Text {
+                                    text: {
+                                        void translator.language
+                                        const c = Number(backend.selectedTextCharCount).toLocaleString(Qt.locale(), 'f', 0)
+                                        if (backend.selectedTextWordCount > 1)
+                                            return qsTr("%n words", "", backend.selectedTextWordCount)
+                                        return qsTr("%1 chars").arg(c)
+                                    }
+                                    color: "#a4a4b0"
+                                    font.pixelSize: 12
+                                }
+
+                                Text {
+                                    text: qsTr("Copy Text")
+                                    color: theme.accent
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.copySelectedText()
+                                    }
+                                }
+
+                                Text {
+                                    text: qsTr("Select All")
+                                    color: "#e4e4ec"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.selectAllPageText()
+                                    }
+                                }
+
+                                Text {
+                                    visible: backend.selectedText.indexOf("\n") < 0 && backend.selectedText.length <= 80
+                                    text: qsTr("Find")
+                                    color: "#e4e4ec"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: win.openFindBar()
+                                    }
+                                }
+
+                                Text {
+                                    text: "✕"
+                                    color: "#9a9aa4"
+                                    font.pixelSize: 12
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.clearTextSelection()
+                                    }
+                                }
+                            }
+                        }
+
                         // Floating Adjust Color HUD on right edge of canvas.
                         ColorSheet {
                             visible: win.colorVisible && backend.hasImage && !win.modalOpen
                             anchors.top: parent.top
-                            anchors.topMargin: win.markupMode ? 64 : 14
+                            anchors.topMargin: (win.markupMode ? 64 : 14) + (win.findVisible ? 50 : 0)
                             anchors.right: parent.right
                             anchors.rightMargin: 14
                             onCloseRequested: win.colorVisible = false
@@ -799,7 +1092,7 @@ ApplicationWindow {
                         InspectorSheet {
                             visible: win.inspectorVisible && backend.hasImage && !win.modalOpen
                             anchors.top: parent.top
-                            anchors.topMargin: win.markupMode ? 64 : 14
+                            anchors.topMargin: (win.markupMode ? 64 : 14) + (win.findVisible ? 50 : 0)
                             anchors.right: parent.right
                             anchors.rightMargin: 14
                             onCloseRequested: win.inspectorVisible = false
@@ -881,7 +1174,7 @@ ApplicationWindow {
                         readonly property string messageText: isError ? backend.errorMessage : backend.statusMessage
                         visible: messageText.length > 0
                         anchors.top: parent.top
-                        anchors.topMargin: win.selectMode ? 52 : 14
+                        anchors.topMargin: (win.selectMode || win.findVisible) ? 58 : 14
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: Math.min(parent.width - 40, toastRow.implicitWidth + 28)
                         height: 38
@@ -1003,6 +1296,39 @@ ApplicationWindow {
                         spacing: 1
 
                         ToolButton {
+                            visible: backend.isPdfMode
+                            Material.roundedScale: Math.min(4, theme.radius)
+                            implicitWidth: 34; implicitHeight: 34
+                            text: "⌕"
+                            font.pixelSize: 16
+                            highlighted: win.findVisible || backend.searchMatchCount > 0
+                            Material.accent: theme.accent
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Find in PDF (Ctrl+F)")
+                            onClicked: {
+                                if (win.findVisible)
+                                    win.closeFindBar()
+                                else
+                                    win.openFindBar()
+                            }
+                        }
+
+                        ToolButton {
+                            visible: backend.currentPageIsPdf
+                            Material.roundedScale: Math.min(4, theme.radius)
+                            implicitWidth: 34; implicitHeight: 34
+                            text: "I"
+                            font.pixelSize: 14
+                            font.family: "serif"
+                            font.weight: Font.DemiBold
+                            highlighted: win.textSelectMode || backend.hasTextSelection
+                            Material.accent: theme.accent
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Select PDF Text (X)")
+                            onClicked: { win.markupMode = false; win.selectMode = false; win.textSelectMode = !win.textSelectMode }
+                        }
+
+                        ToolButton {
                             Material.roundedScale: Math.min(4, theme.radius)
                             implicitWidth: 34; implicitHeight: 34
                             text: "⬚"
@@ -1011,7 +1337,7 @@ ApplicationWindow {
                             Material.accent: theme.accent
                             ToolTip.visible: hovered
                             ToolTip.text: qsTr("Select / Crop (S)")
-                            onClicked: { win.markupMode = false; win.selectMode = !win.selectMode }
+                            onClicked: { win.markupMode = false; win.textSelectMode = false; win.selectMode = !win.selectMode }
                         }
 
                         ToolButton {
@@ -1023,7 +1349,7 @@ ApplicationWindow {
                             Material.accent: theme.accent
                             ToolTip.visible: hovered
                             ToolTip.text: qsTr("Markup Toolbar (M)")
-                            onClicked: { win.selectMode = false; win.markupMode = !win.markupMode }
+                            onClicked: { win.selectMode = false; win.textSelectMode = false; win.markupMode = !win.markupMode }
                         }
 
                         ToolButton {

@@ -2,7 +2,7 @@ QT += core gui qml quick quickcontrols2 dbus
 
 CONFIG += c++17 release link_pkgconfig
 PKGCONFIG += poppler-qt6
-TARGET = peek
+TARGET = omarchy-preview
 TEMPLATE = app
 
 HEADERS += \

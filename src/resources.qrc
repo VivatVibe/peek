@@ -6,6 +6,7 @@
         <file alias="ColorSheet.qml">ColorSheet.qml</file>
         <file alias="InspectorSheet.qml">InspectorSheet.qml</file>
         <file alias="MarkupBar.qml">MarkupBar.qml</file>
+        <file alias="FindBar.qml">FindBar.qml</file>
         <file alias="ExportSheet.qml">ExportSheet.qml</file>
         <file alias="QuitConfirmOverlay.qml">QuitConfirmOverlay.qml</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>

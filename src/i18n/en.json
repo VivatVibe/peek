@@ -18,5 +18,9 @@
   "%n selected": {
     "one": "%n selected",
     "other": "%n selected"
+  },
+  "%n words": {
+    "one": "%n word",
+    "other": "%n words"
   }
 }

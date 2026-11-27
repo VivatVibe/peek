@@ -243,7 +243,7 @@ bool exportImageAtomic(const QImage &image,
     // Write beside target, then rename atomically so originals or prior exports
     // are never corrupted by a partial write.
     const QString tempPath = parentDir.filePath(
-        "." + targetInfo.fileName() + ".peek-" + QUuid::createUuid().toString(QUuid::Id128) + ".tmp");
+        "." + targetInfo.fileName() + ".omarchy-preview-" + QUuid::createUuid().toString(QUuid::Id128) + ".tmp");
 
     {
         QImageWriter writer(tempPath, norm.toLatin1());

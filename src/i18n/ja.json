@@ -132,5 +132,29 @@
   "PDF page %1 is out of range.": "PDFページ %1 は範囲外です。",
   "Could not load PDF page %1.": "PDFページ %1 を読み込めません。",
   "Could not render PDF page %1.": "PDFページ %1 を描画できません。",
-  "Could not render page %1 of %2": "%2 の %1 ページを描画できません"
+  "Could not render page %1 of %2": "%2 の %1 ページを描画できません",
+  "Find in PDF…": "PDF内を検索…",
+  "Searching…": "検索中…",
+  "No matches": "一致なし",
+  "Match Case": "大文字・小文字を区別",
+  "Previous Match (Shift+Enter)": "前の一致 (Shift+Enter)",
+  "Next Match (Enter)": "次の一致 (Enter)",
+  "Close (Esc)": "閉じる (Esc)",
+  "Thumbnails": "サムネイル",
+  "Outline": "目次",
+  "No table of contents in this PDF.": "このPDFには目次がありません。",
+  "Toggle PDF Outline / TOC": "PDF目次の表示切替",
+  "Find Text in PDF": "PDF内のテキストを検索",
+  "Next / Previous Match": "次 / 前の一致",
+  "Toggle PDF Text Selection": "PDFテキスト選択の切替",
+  "Find in PDF (Ctrl+F)": "PDF内を検索 (Ctrl+F)",
+  "Select PDF Text (X)": "PDFテキストを選択 (X)",
+  "%n words": {
+    "other": "%n 語"
+  },
+  "%1 chars": "%1 文字",
+  "Copy Text": "テキストをコピー",
+  "Select All": "すべて選択",
+  "Find": "検索",
+  "Copied text to clipboard": "テキストをクリップボードにコピーしました"
 }

@@ -2,11 +2,13 @@
 
 #include "filepicker.h"
 #include "imageops.h"
+#include "pdfdocument.h"
 #include "presetstore.h"
 #include "printrenderer.h"
 
 #include <QHash>
 #include <QImage>
+#include <QMutex>
 #include <QObject>
 #include <QProcess>
 #include <QQuickImageProvider>
@@ -16,6 +18,8 @@
 #include <QUrl>
 #include <QVariantList>
 #include <QVector>
+#include <atomic>
+#include <memory>
 
 struct CupsOption {
     QString key;
@@ -45,6 +49,8 @@ class Backend : public QObject {
     Q_PROPERTY(int imageIndex READ imageIndex NOTIFY imageChanged)
     Q_PROPERTY(int imageCount READ imageCount NOTIFY filesChanged)
     Q_PROPERTY(bool isPdfMode READ isPdfMode NOTIFY filesChanged)
+    Q_PROPERTY(bool currentPageIsPdf READ currentPageIsPdf NOTIFY imageChanged)
+    Q_PROPERTY(bool currentPageHasText READ currentPageHasText NOTIFY pdfTextChanged)
     Q_PROPERTY(bool hasDocumentChanges READ hasDocumentChanges NOTIFY filesChanged)
     Q_PROPERTY(QVariantList fileItems READ fileItems NOTIFY filesChanged)
     Q_PROPERTY(int selectedCount READ selectedCount NOTIFY filesChanged)
@@ -75,6 +81,24 @@ class Backend : public QObject {
     Q_PROPERTY(int selectionPixelWidth READ selectionPixelWidth NOTIFY selectionChanged)
     Q_PROPERTY(int selectionPixelHeight READ selectionPixelHeight NOTIFY selectionChanged)
     Q_PROPERTY(bool printSelectionOnly READ printSelectionOnly WRITE setPrintSelectionOnly NOTIFY printSettingsChanged)
+
+    // PDF text search, text selection, and document outline (TOC).
+    Q_PROPERTY(QString searchQuery READ searchQuery NOTIFY searchChanged)
+    Q_PROPERTY(bool searchCaseSensitive READ searchCaseSensitive WRITE setSearchCaseSensitive NOTIFY searchChanged)
+    Q_PROPERTY(bool searchBusy READ searchBusy NOTIFY searchChanged)
+    Q_PROPERTY(int searchMatchCount READ searchMatchCount NOTIFY searchChanged)
+    Q_PROPERTY(int searchCurrentIndex READ searchCurrentIndex NOTIFY searchChanged)
+    Q_PROPERTY(QVariantList currentPageSearchRects READ currentPageSearchRects NOTIFY searchChanged)
+    Q_PROPERTY(QVariantMap activeSearchRect READ activeSearchRect NOTIFY searchChanged)
+
+    Q_PROPERTY(bool hasTextSelection READ hasTextSelection NOTIFY textSelectionChanged)
+    Q_PROPERTY(QString selectedText READ selectedText NOTIFY textSelectionChanged)
+    Q_PROPERTY(int selectedTextWordCount READ selectedTextWordCount NOTIFY textSelectionChanged)
+    Q_PROPERTY(int selectedTextCharCount READ selectedTextCharCount NOTIFY textSelectionChanged)
+    Q_PROPERTY(QVariantList textSelectionRects READ textSelectionRects NOTIFY textSelectionChanged)
+
+    Q_PROPERTY(bool hasOutline READ hasOutline NOTIFY outlineChanged)
+    Q_PROPERTY(QVariantList outlineItems READ outlineItems NOTIFY outlineChanged)
 
     // Printer discovery & CUPS PPD options.
     Q_PROPERTY(QStringList printers READ printers NOTIFY printersChanged)
@@ -148,6 +172,8 @@ public:
     int imageIndex() const { return m_currentIndex; }
     int imageCount() const { return m_entries.size(); }
     bool isPdfMode() const { return m_isPdfMode; }
+    bool currentPageIsPdf() const;
+    bool currentPageHasText() const { return !m_pageChars.isEmpty(); }
     bool hasDocumentChanges() const;
     QVariantList fileItems() const;
     int selectedCount() const { return m_selectedIndices.size(); }
@@ -178,6 +204,24 @@ public:
     int selectionPixelHeight() const;
     bool printSelectionOnly() const { return m_printSelectionOnly; }
     void setPrintSelectionOnly(bool enabled);
+
+    QString searchQuery() const { return m_searchQuery; }
+    bool searchCaseSensitive() const { return m_searchCaseSensitive; }
+    void setSearchCaseSensitive(bool enabled);
+    bool searchBusy() const { return m_searchBusy; }
+    int searchMatchCount() const { return m_searchMatches.size(); }
+    int searchCurrentIndex() const { return m_searchCurrentIndex; }
+    QVariantList currentPageSearchRects() const;
+    QVariantMap activeSearchRect() const;
+
+    bool hasTextSelection() const { return !m_selectedText.isEmpty(); }
+    QString selectedText() const { return m_selectedText; }
+    int selectedTextWordCount() const;
+    int selectedTextCharCount() const { return m_selectedText.size(); }
+    QVariantList textSelectionRects() const;
+
+    bool hasOutline() const { return !m_outlineNodes.isEmpty(); }
+    QVariantList outlineItems() const;
 
     QImage displayImage() const { return m_displayImage; }
     QImage thumbnailForIndex(int index) const;
@@ -284,6 +328,23 @@ public:
     Q_INVOKABLE void cropToSelection();
     Q_INVOKABLE void copyToClipboard();
 
+    // PDF text search, selection & outline actions.
+    Q_INVOKABLE void setSearchQuery(const QString &query);
+    Q_INVOKABLE void nextSearchMatch();
+    Q_INVOKABLE void previousSearchMatch();
+    Q_INVOKABLE void clearSearch();
+
+    Q_INVOKABLE bool isPointOverText(double normX, double normY) const;
+    Q_INVOKABLE void selectTextRange(double startNormX, double startNormY, double endNormX, double endNormY);
+    Q_INVOKABLE void selectWordAt(double normX, double normY);
+    Q_INVOKABLE void selectLineAt(double normX, double normY);
+    Q_INVOKABLE void selectAllPageText();
+    Q_INVOKABLE void clearTextSelection();
+    Q_INVOKABLE void copySelectedText();
+
+    Q_INVOKABLE void toggleOutlineItem(int id);
+    Q_INVOKABLE void jumpToOutlineItem(int id);
+
     Q_INVOKABLE void applyResize(int width, int height);
     Q_INVOKABLE void resetResize();
 
@@ -333,6 +394,10 @@ signals:
     void exportSettingsChanged();
     void filesChanged();
     void selectionChanged();
+    void pdfTextChanged();
+    void searchChanged();
+    void textSelectionChanged();
+    void outlineChanged();
     void printersChanged();
     void printerOptionsChanged();
     void printSettingsChanged();
@@ -353,6 +418,16 @@ private:
     void persistLastUsed(bool markPresetModified = true);
     void applyBuiltInCupsHints(const QString &presetId);
     void clampPreviewPage();
+    QSize previewReferenceSize() const;
+    void reloadCurrentPageText();
+    void rebuildOutline();
+    void runSearch(bool jumpToMatch);
+    void cancelActiveSearch();
+    void applySearchResults(QVector<PdfDocument::PdfBatchMatchRef> &&hits, bool jumpToMatch);
+    const QVector<PdfDocument::PdfPageMatch> &ensureCurrentPageSearchMatches() const;
+    void applyCharSelectionRange(int startIdx, int endIdx);
+    int findNearestCharIndex(const QPointF &pdfPt) const;
+    int findEntryIndexForOutline(const QString &sourcePath, int sourcePageIndex) const;
     QRect selectionPixelRect() const;
     QVector<int> activeBatchIndices() const;
     void setStatus(const QString &msg);
@@ -378,6 +453,7 @@ private:
     QImage m_displayImage;
     QSize m_preResizeSize;
     QVariantMap m_metadata;
+    mutable QMutex m_thumbMutex;
     mutable QHash<int, QImage> m_thumbCache;
     mutable QHash<QString, QImage> m_batchImageCache;
     int m_imageVersion = 0;
@@ -397,6 +473,44 @@ private:
 
     QRectF m_selectionNorm;
     bool m_printSelectionOnly = false;
+
+    struct FlatTextChar {
+        int wordIndex = 0;
+        int lineIndex = 0;
+        QChar ch;
+        QRectF pdfNormRect;
+        bool spaceAfter = false;
+        bool lineBreakBefore = false;
+    };
+    struct OutlineNode {
+        QString title;
+        QString sourcePath;
+        int sourcePageIndex = -1;
+        int depth = 0;
+        bool hasChildren = false;
+        bool expanded = true;
+    };
+
+    QVector<PdfTextWord> m_pageTextWords;
+    QVector<FlatTextChar> m_pageChars;
+    int m_textSelStart = -1;
+    int m_textSelEnd = -1;
+    QString m_selectedText;
+    QVector<QRectF> m_textSelPdfRects;
+
+    QString m_searchQuery;
+    bool m_searchCaseSensitive = false;
+    bool m_searchBusy = false;
+    quint64 m_searchGeneration = 0;
+    std::shared_ptr<std::atomic<bool>> m_searchCancel;
+    QVector<PdfDocument::PdfBatchMatchRef> m_searchMatches;
+    int m_searchCurrentIndex = -1;
+    mutable int m_cachedSearchRectsEntry = -1;
+    mutable QString m_cachedSearchRectsQuery;
+    mutable bool m_cachedSearchRectsCase = false;
+    mutable QVector<PdfDocument::PdfPageMatch> m_cachedSearchPageMatches;
+
+    QVector<OutlineNode> m_outlineNodes;
 
     QStringList m_printers;
     QString m_defaultPrinter;
@@ -422,9 +536,9 @@ private:
     QString m_errorMessage;
 };
 
-class PeekImageProvider : public QQuickImageProvider {
+class PreviewImageProvider : public QQuickImageProvider {
 public:
-    explicit PeekImageProvider(Backend *backend)
+    explicit PreviewImageProvider(Backend *backend)
         : QQuickImageProvider(QQuickImageProvider::Image), m_backend(backend) {}
 
     QImage requestImage(const QString &id, QSize *size, const QSize &) override {
