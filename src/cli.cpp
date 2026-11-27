@@ -832,7 +832,7 @@ std::optional<int> run(const QStringList &arguments, QStringList &guiFiles) {
         const QString tempPdf = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
                                     .filePath("omarchy-preview-cli-" + QUuid::createUuid().toString(QUuid::Id128) + ".pdf");
         QString exportError;
-        if (!PrintRenderer::exportPdf(tempPdf, pages, opts.print, &exportError)) {
+        if (!PrintRenderer::exportPdf(tempPdf, pages, opts.print, &exportError, true)) {
             printError(exportError, opts.json);
             return 1;
         }

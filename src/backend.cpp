@@ -2013,7 +2013,7 @@ void Backend::printCurrent() {
         "omarchy-preview-print-" + QUuid::createUuid().toString(QUuid::Id128) + ".pdf");
 
     QString exportError;
-    if (!PrintRenderer::exportPdf(tempPdf, pages, m_printSettings, &exportError)) {
+    if (!PrintRenderer::exportPdf(tempPdf, pages, m_printSettings, &exportError, true)) {
         setError(exportError);
         return;
     }

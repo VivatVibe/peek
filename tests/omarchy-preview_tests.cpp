@@ -247,6 +247,121 @@ private slots:
         QCOMPARE(batched.at(1).size(), 1);
     }
 
+    void normalizesLandscapePagesToPhysicalPortraitForPrinting() {
+        QTemporaryDir dir;
+
+        // Build a landscape marker image: white background, green top-left corner,
+        // blue circle in center so rotation and aspect ratio are verifiable pixel-for-pixel.
+        QImage landscapeImg(600, 400, QImage::Format_ARGB32);
+        landscapeImg.fill(Qt::white);
+        {
+            QPainter p(&landscapeImg);
+            p.fillRect(QRect(0, 0, 140, 100), QColor(20, 180, 40));
+            p.setBrush(QColor(30, 80, 220));
+            p.setPen(Qt::NoPen);
+            p.drawEllipse(QPoint(300, 200), 90, 90);
+        }
+        const QString imgPath = dir.filePath("landscape_cards.png");
+        QVERIFY(landscapeImg.save(imgPath));
+
+        QImage portraitImg(300, 500, QImage::Format_ARGB32);
+        portraitImg.fill(QColor(220, 60, 60));
+
+        PrintSettings settings;
+        settings.paperSize = "a4";
+        settings.orientation = "landscape";
+        settings.scaleMode = "fill";
+        settings.marginMode = "narrow";
+
+        // 1. Save as PDF (normalizeForPrint = false) stays landscape for PDF viewers.
+        const QString savedPdf = dir.filePath("saved_landscape.pdf");
+        QVERIFY(PrintRenderer::exportPdf(savedPdf, landscapeImg, settings, nullptr, false));
+        const QSizeF savedMm = PdfDocument::pageSizeMm(savedPdf, 0);
+        QVERIFY(savedMm.width() > savedMm.height());
+        QVERIFY(std::abs(savedMm.width() - 297.0) < 1.0);
+        QVERIFY(std::abs(savedMm.height() - 210.0) < 1.0);
+
+        // 2. Print PDF (normalizeForPrint = true) uses physical portrait A4 media
+        //    with the landscape layout rotated 90 degrees clockwise (top-left -> top-right).
+        const QString printPdf = dir.filePath("print_landscape.pdf");
+        QVERIFY(PrintRenderer::exportPdf(printPdf, landscapeImg, settings, nullptr, true));
+        const QSizeF printMm = PdfDocument::pageSizeMm(printPdf, 0);
+        QVERIFY(printMm.height() > printMm.width());
+        QVERIFY(std::abs(printMm.width() - 210.0) < 1.0);
+        QVERIFY(std::abs(printMm.height() - 297.0) < 1.0);
+
+        const QImage rendered = PdfDocument::renderPage(printPdf, 0, 72.0);
+        QVERIFY(!rendered.isNull());
+        QVERIFY(rendered.height() > rendered.width());
+        // Green marker from landscape top-left lands in the portrait top-right quadrant.
+        int greenCountTopRight = 0;
+        int minBlueX = rendered.width(), maxBlueX = 0, minBlueY = rendered.height(), maxBlueY = 0;
+        for (int y = 0; y < rendered.height(); ++y) {
+            for (int x = 0; x < rendered.width(); ++x) {
+                const QColor c = rendered.pixelColor(x, y);
+                if (x > rendered.width() * 0.6 && y < rendered.height() * 0.35 &&
+                    c.green() > 140 && c.red() < 100 && c.blue() < 100) {
+                    ++greenCountTopRight;
+                }
+                if (c.blue() > 150 && c.red() < 100 && c.green() < 120) {
+                    minBlueX = std::min(minBlueX, x);
+                    maxBlueX = std::max(maxBlueX, x);
+                    minBlueY = std::min(minBlueY, y);
+                    maxBlueY = std::max(maxBlueY, y);
+                }
+            }
+        }
+        QVERIFY(greenCountTopRight > 200);
+        const int blueW = maxBlueX - minBlueX + 1;
+        const int blueH = maxBlueY - minBlueY + 1;
+        QVERIFY(blueW > 100 && blueH > 100);
+        // Center blue circle remains circular (1:1 aspect ratio, zero stretching).
+        QVERIFY(std::abs(blueW - blueH) <= 4);
+
+        // 3. Mixed-orientation auto print job normalizes both pages to portrait A4 media.
+        PrintSettings autoSettings;
+        autoSettings.paperSize = "a4";
+        autoSettings.orientation = "auto";
+        const QString mixedPdf = dir.filePath("mixed_print.pdf");
+        QVERIFY(PrintRenderer::exportPdf(mixedPdf, {{portraitImg}, {landscapeImg}}, autoSettings, nullptr, true));
+        QCOMPARE(PdfDocument::pageCount(mixedPdf), 2);
+        const QSizeF p0 = PdfDocument::pageSizeMm(mixedPdf, 0);
+        const QSizeF p1 = PdfDocument::pageSizeMm(mixedPdf, 1);
+        QVERIFY(p0.height() > p0.width());
+        QVERIFY(p1.height() > p1.width());
+
+        // 4. Backend::printCurrent() sends the normalized portrait PDF to lp.
+        const QString fakeLpstat = dir.filePath("lpstat");
+        const QString fakeLp = dir.filePath("lp");
+        const QString capturedPdf = dir.filePath("captured_job.pdf");
+        writeExecutable(fakeLpstat,
+                        "#!/bin/sh\n"
+                        "echo 'printer EPSON-L385-Series is idle. enabled since today'\n"
+                        "echo 'system default destination: EPSON-L385-Series'\n");
+        writeExecutable(fakeLp,
+                        "#!/bin/sh\n"
+                        "last=''\n"
+                        "for a in \"$@\"; do last=\"$a\"; done\n"
+                        "cp \"$last\" '" + capturedPdf.toUtf8() + "'\n"
+                        "echo 'request id is EPSON-L385-Series-99 (1 file(s))'\n");
+
+        Backend backend(nullptr, fakeLpstat, fakeLp, "/nonexistent-lpoptions", dir.filePath("presets.json"));
+        QTRY_COMPARE(backend.printers().size(), 1);
+        QVERIFY(backend.openFiles({imgPath}));
+        backend.setPaperSize("a4");
+        backend.setOrientation("landscape");
+        backend.setScaleMode("fill");
+        backend.setMarginMode("narrow");
+        backend.printCurrent();
+
+        QTRY_VERIFY(!backend.printBusy());
+        QVERIFY(QFileInfo::exists(capturedPdf));
+        const QSizeF sentMm = PdfDocument::pageSizeMm(capturedPdf, 0);
+        QVERIFY(sentMm.height() > sentMm.width());
+        QVERIFY(std::abs(sentMm.width() - 210.0) < 1.0);
+        QVERIFY(std::abs(sentMm.height() - 297.0) < 1.0);
+    }
+
     void multiSelectAndSelectionCropWorkForPrinting() {
         QTemporaryDir dir;
         QStringList paths;

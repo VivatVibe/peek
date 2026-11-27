@@ -77,12 +77,14 @@ void paintPage(QPainter &painter,
 bool exportPdf(const QString &outputPath,
                const QVector<QVector<QImage>> &pages,
                const PrintSettings &settings,
-               QString *errorMessage = nullptr);
+               QString *errorMessage = nullptr,
+               bool normalizeForPrint = false);
 
 bool exportPdf(const QString &outputPath,
                const QImage &transformedImage,
                const PrintSettings &settings,
-               QString *errorMessage = nullptr);
+               QString *errorMessage = nullptr,
+               bool normalizeForPrint = false);
 
 } // namespace PrintRenderer
 

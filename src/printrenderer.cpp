@@ -331,7 +331,8 @@ void paintPage(QPainter &painter,
 bool exportPdf(const QString &outputPath,
                const QVector<QVector<QImage>> &pages,
                const PrintSettings &settings,
-               QString *errorMessage) {
+               QString *errorMessage,
+               bool normalizeForPrint) {
     if (pages.isEmpty() || pages.first().isEmpty() || pages.first().first().isNull()) {
         if (errorMessage)
             *errorMessage = QObject::tr("No image is loaded to export.");
@@ -362,11 +363,24 @@ bool exportPdf(const QString &outputPath,
                                        ? QPageSize(QSizeF(spec.widthMm, spec.heightMm), QPageSize::Millimeter, spec.id)
                                        : QPageSize(spec.qtPageSize);
 
+        // CUPS drivers (e.g. Epson ESC/P-R) expect raster dimensions matching the
+        // physical portrait media feed, and cups-filters 2.x disables pdftopdf
+        // auto-rotation when print-scaling=none is requested. Pre-rotating
+        // landscape sheets onto the physical media orientation keeps scale and
+        // margins 1:1 while preserving mixed-orientation auto print jobs.
+        auto shouldRotatePage = [&](const QVector<QImage> &slotImages) {
+            if (!normalizeForPrint || std::abs(spec.widthMm - spec.heightMm) <= 0.5)
+                return false;
+            const QSize refSize = slotImages.isEmpty() ? QSize() : slotImages.first().size();
+            return resolveLandscape(settings, refSize);
+        };
+
         auto layoutForPage = [&](const QVector<QImage> &slotImages) {
             const QSize refSize = slotImages.isEmpty() ? QSize() : slotImages.first().size();
             const bool landscape = resolveLandscape(settings, refSize);
+            const bool useLandscapeMedia = landscape && !shouldRotatePage(slotImages);
             return QPageLayout(pageSize,
-                               landscape ? QPageLayout::Landscape : QPageLayout::Portrait,
+                               useLandscapeMedia ? QPageLayout::Landscape : QPageLayout::Portrait,
                                QMarginsF(0, 0, 0, 0),
                                QPageLayout::Millimeter);
         };
@@ -386,8 +400,16 @@ bool exportPdf(const QString &outputPath,
                 writer.setPageLayout(layoutForPage(pages.at(i)));
                 writer.newPage();
             }
-            const QRectF pageRect(0.0, 0.0, writer.width(), writer.height());
-            paintPage(painter, pageRect, pages.at(i), settings, false);
+            if (shouldRotatePage(pages.at(i))) {
+                painter.save();
+                painter.translate(writer.width(), 0.0);
+                painter.rotate(90.0);
+                paintPage(painter, QRectF(0.0, 0.0, writer.height(), writer.width()), pages.at(i), settings, false);
+                painter.restore();
+            } else {
+                const QRectF pageRect(0.0, 0.0, writer.width(), writer.height());
+                paintPage(painter, pageRect, pages.at(i), settings, false);
+            }
         }
         painter.end();
     }
@@ -406,11 +428,12 @@ bool exportPdf(const QString &outputPath,
 bool exportPdf(const QString &outputPath,
                const QImage &transformedImage,
                const PrintSettings &settings,
-               QString *errorMessage) {
+               QString *errorMessage,
+               bool normalizeForPrint) {
     if (transformedImage.isNull())
-        return exportPdf(outputPath, QVector<QVector<QImage>>{}, settings, errorMessage);
+        return exportPdf(outputPath, QVector<QVector<QImage>>{}, settings, errorMessage, normalizeForPrint);
     const QVector<QVector<QImage>> pages = paginateImages({transformedImage}, settings.perPage, true);
-    return exportPdf(outputPath, pages, settings, errorMessage);
+    return exportPdf(outputPath, pages, settings, errorMessage, normalizeForPrint);
 }
 
 } // namespace PrintRenderer
